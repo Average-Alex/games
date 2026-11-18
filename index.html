@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Two-Wheel Arcade</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,400..900;1,62..125,400..900&display=swap">
+<style>
+  /* Layout: one column; a title band, then two game cards side by side that stack on phones. */
+  :root {
+    color-scheme: dark;
+    --ground: #101119;
+    --panel: #181a24;
+    --ink: #f3efe7;
+    --muted: #a7a39b;
+    --pink: #ff3d7f;
+    --ember: #ff7a2f;
+    --display: "Archivo", "Arial Narrow", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: var(--ground); color: var(--ink); font: 16px/1.5 var(--display); padding-block: 48px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  main { max-width: 980px; margin: 0 auto; display: grid; gap: 32px; }
+  .eyebrow { font-size: 13px; font-weight: 700; font-stretch: 75%; letter-spacing: .3em; text-transform: uppercase; color: var(--muted); }
+  h1 { margin: 6px 0 0; font-weight: 900; font-style: italic; font-stretch: 62%; font-size: clamp(56px, 11vw, 112px); line-height: .85; text-transform: uppercase; text-wrap: balance; }
+  .games { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+  .game { display: grid; gap: 12px; align-content: start; padding: 22px; background: var(--panel); border-top: 4px solid var(--c); text-decoration: none; color: inherit; min-width: 0; }
+  .game:hover { background: #1f2230; }
+  .game:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+  .game .art { aspect-ratio: 16 / 7; border-radius: 3px; max-width: 100%; }
+  .game h2 { margin: 0; font-weight: 900; font-style: italic; font-stretch: 70%; font-size: 40px; line-height: .95; text-transform: uppercase; }
+  .game p { margin: 0; color: var(--muted); font-size: 15px; }
+  .play { justify-self: start; font-weight: 900; font-style: italic; font-stretch: 75%; font-size: 20px; text-transform: uppercase; letter-spacing: .04em; padding: 9px 22px; border-radius: 3px; background: var(--c); color: #12060b; }
+  .note { margin: 0; color: var(--muted); font-size: 14px; }
+  @media (max-width: 680px) { .games { grid-template-columns: minmax(0, 1fr); } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Browser games · keyboard &amp; mouse</div>
+    <h1>Two-Wheel Arcade</h1>
+  </header>
+  <div class="games">
+    <a class="game" href="wheelie-city.html" style="--c: var(--pink)">
+      <div class="art" style="background: linear-gradient(180deg,#33417f,#e9845f 55%,#3b3a3f 56%,#3b3a3f 70%,#e6b928 71%,#3b3a3f 73%)"></div>
+      <h2>Wheelie City</h2>
+      <p>E-moto wheelies through LA, Vancouver, Vegas, Miami and New York. Find the balance point, chain no-handers and high chairs, dodge traffic. Chase cam or first person.</p>
+      <span class="play">Ride</span>
+    </a>
+    <a class="game" href="ridgeline-rush.html" style="--c: var(--ember)">
+      <div class="art" style="background: linear-gradient(180deg,#241a40,#7b4166 45%,#d48a66 60%,#3d5a2a 61%,#2b5a33 100%)"></div>
+      <h2>Ridgeline Rush</h2>
+      <p>Downhill mountain biking on a fresh forest trail every run. Tabletops, drops and gaps; flips, whips, tailwhips and nac-nacs.</p>
+      <span class="play">Drop in</span>
+    </a>
+  </div>
+  <p class="note">Needs a computer with a keyboard and mouse, and a browser with WebGL (Chrome, Edge or Firefox). Best scores are saved in your browser.</p>
+</main>
+</body>
+</html>
