@@ -161,7 +161,7 @@ let cityKey = store.get('wc-city', 'van'); if (!CITIES[cityKey]) cityKey = 'van'
 let bikeKey = store.get('wc-bike2', 'lbx'); if (!BIKES[bikeKey]) bikeKey = 'lbx';
 let pov = store.get('wc-pov2', 'chase'); if (!POVS.some((p) => p[0] === pov)) pov = 'chase';
 let sens = store.get('wc-sens', 1);
-let quality = store.get('wc-quality', 'med'); if (!['low', 'med', 'high'].includes(quality)) quality = 'med';
+let quality = store.get('wc-quality2', 'ultra'); if (!['low', 'med', 'high', 'ultra'].includes(quality)) quality = 'ultra';
 let C = CITIES[cityKey];
 
 // ---------------------------------------------------------------- renderer and stage
@@ -172,20 +172,88 @@ if (renderer) { renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.ton
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog('#000', 50, 300);
 const camera = new THREE.PerspectiveCamera(70, 16 / 9, 0.08, 2500);
+// Graphics: Ultra by default. A governor (play.js) then trades render resolution for frame rate to hold ~30 fps.
+const GOV = { pr: 1, ema: 16, t: 0, dropRadius: 0 };
+function maxPixelRatio() { return Math.min(devicePixelRatio || 1, quality === 'ultra' ? 2 : quality === 'high' ? 2 : quality === 'med' ? 1.5 : 1); }
 function applyQuality() {
   if (!renderer) return;
-  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, quality === 'high' ? 2 : quality === 'med' ? 1.5 : 1));
+  GOV.pr = Math.min(maxPixelRatio(), quality === 'ultra' ? 1.25 : maxPixelRatio()); GOV.dropRadius = 0;
+  renderer.setPixelRatio(GOV.pr);
   renderer.shadowMap.enabled = quality !== 'low';
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   dirL.castShadow = quality !== 'low';
-  const sz = quality === 'high' ? 2048 : 1024;
+  const sz = quality === 'ultra' ? 4096 : quality === 'high' ? 2048 : 1024, ext = quality === 'ultra' ? 70 : 45;
+  dirL.shadow.camera.left = -ext; dirL.shadow.camera.right = ext; dirL.shadow.camera.top = ext; dirL.shadow.camera.bottom = -ext; dirL.shadow.camera.updateProjectionMatrix();
   if (dirL.shadow.mapSize.x !== sz) { dirL.shadow.mapSize.set(sz, sz); if (dirL.shadow.map) { dirL.shadow.map.dispose(); dirL.shadow.map = null; } }
   scene.traverse((o) => { if (o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; for (const m of ms) m.needsUpdate = true; } });
+  setupPost();
 }
 function resize() {
   if (!renderer) return;
   const w = Math.max(1, stage.clientWidth), hgt = Math.max(1, stage.clientHeight);
   renderer.setSize(w, hgt, false); camera.aspect = w / hgt; camera.updateProjectionMatrix();
+  sizePost();
+}
+// ---- post-processing on Ultra: bloom on lights, neon and sun, a film-style grade with vignette, FXAA edges
+const GradeShader = {
+  uniforms: { tDiffuse: { value: null }, vignette: { value: 0.32 }, saturation: { value: 1.1 }, contrast: { value: 1.06 }, warmth: { value: 0.02 } },
+  vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: [
+    'uniform sampler2D tDiffuse; uniform float vignette, saturation, contrast, warmth; varying vec2 vUv;',
+    'void main() {',
+    '  vec4 c = texture2D(tDiffuse, vUv);',
+    '  float l = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));',
+    '  c.rgb = mix(vec3(l), c.rgb, saturation);',
+    '  c.rgb = (c.rgb - 0.5) * contrast + 0.5;',
+    '  c.rgb += vec3(warmth, warmth * 0.3, -warmth) * (1.0 - l);',
+    '  vec2 d = vUv - 0.5; c.rgb *= 1.0 - vignette * smoothstep(0.25, 0.85, length(d * vec2(1.25, 1.0)));',
+    '  gl_FragColor = vec4(clamp(c.rgb, 0.0, 1.0), c.a);',
+    '}'].join('\n'),
+};
+let composer = null, bloomPass = null, fxaaPass = null;
+function setupPost() {
+  composer = null;
+  if (!renderer || quality !== 'ultra' || !THREE.EffectComposer || !THREE.UnrealBloomPass) return;
+  try {
+    composer = new THREE.EffectComposer(renderer);
+    composer.addPass(new THREE.RenderPass(scene, camera));
+    bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(256, 256), 0.45, 0.55, 0.84);
+    composer.addPass(bloomPass);
+    composer.addPass(new THREE.ShaderPass(GradeShader));
+    fxaaPass = new THREE.ShaderPass(THREE.FXAAShader);
+    composer.addPass(fxaaPass);
+    sizePost();
+  } catch (e) { console.warn('post-processing off', e); composer = null; }
+}
+function sizePost() {
+  if (!composer) return;
+  const w = Math.max(1, stage.clientWidth), h = Math.max(1, stage.clientHeight), pr = renderer.getPixelRatio();
+  composer.setPixelRatio(pr); composer.setSize(w, h);
+  bloomPass.resolution.set(w * pr / 2, h * pr / 2);
+  fxaaPass.material.uniforms.resolution.value.set(1 / (w * pr), 1 / (h * pr));
+}
+function renderScene() {
+  if (composer) { bloomPass.strength = C.night ? 0.9 : C.dusk ? 0.6 : 0.35 + 0.15 * WX.wet; composer.render(); }
+  else renderer.render(scene, camera);
+}
+// Hold the frame rate: lower the render resolution when frames run long, raise it when there's headroom,
+// and as a last resort pull in the draw distance. Target ~30 fps on Ultra, ~50 fps otherwise.
+function governFrame(ms, active) {
+  if (!renderer) return;
+  GOV.ema += (ms - GOV.ema) * 0.06;
+  GOV.t += ms / 1000;
+  if (!active || GOV.t < 1.2) return;
+  GOV.t = 0;
+  const target = quality === 'ultra' ? 33.3 : 20, maxPr = maxPixelRatio();
+  let pr = GOV.pr;
+  if (GOV.ema > target * 1.12) {
+    if (pr > 0.5) pr = Math.max(0.5, pr * 0.85);
+    else if (GOV.dropRadius < 2 && GOV.ema > target * 1.35) { GOV.dropRadius++; }
+  } else if (GOV.ema < target * 0.75) {
+    if (GOV.dropRadius > 0 && GOV.ema < target * 0.6) GOV.dropRadius--;
+    else if (pr < maxPr) pr = Math.min(maxPr, pr * 1.1);
+  }
+  if (Math.abs(pr - GOV.pr) > 0.01) { GOV.pr = pr; renderer.setPixelRatio(pr); resize(); }
 }
 
 // ---------------------------------------------------------------- geometry helpers
@@ -324,16 +392,18 @@ function pickWeather() {
 }
 function setupWeather() {
   const k = WX.mode === 'auto' ? pickWeather() : WX.mode;
-  Object.assign(WX, { from: k, to: k, t: 1, timer: 150 + Math.random() * 150, wet: k === 'rain' ? 1 : 0 });
+  Object.assign(WX, { from: k, to: k, t: 1, timer: 40 + Math.random() * 30, wet: k === 'rain' ? 1 : 0 });
   applyWeather(0, true);
 }
 function updateWeather(dt, announce) {
   if (WX.mode === 'auto') {
     WX.timer -= dt;
     if (WX.timer <= 0 && WX.t >= 1) {
-      const n = pickWeather();
-      if (n !== WX.to) { WX.from = WX.to; WX.to = n; WX.t = 0; if (announce) announce(WX_NAME[n]); }
-      WX.timer = 150 + Math.random() * 180;
+      let n = pickWeather();
+      for (let k = 0; k < 8 && n === WX.to; k++) n = pickWeather();          // always actually change
+      if (n === WX.to) n = WX.to === 'clear' ? 'cloudy' : 'clear';
+      WX.from = WX.to; WX.to = n; WX.t = 0; if (announce) announce(WX_NAME[n]);
+      WX.timer = 70 + Math.random() * 60;
     }
   } else if (WX.to !== WX.mode && WX.t >= 1) { WX.from = WX.to; WX.to = WX.mode; WX.t = 0; }
   if (WX.t < 1) WX.t = Math.min(1, WX.t + dt / 25);
@@ -364,7 +434,7 @@ function applyWeather(dt, force) {
   if (refreshEnv) updateEnv();
   scene.fog.color.copy(wxC.fog);
   scene.fog.near = C.fogNear * (1 - 0.7 * WX.fog);
-  scene.fog.far = C.fogFar * (quality === 'low' ? 0.75 : quality === 'high' ? 1.25 : 1) * (1 - 0.15 * WX.cloud - 0.3 * WX.rain - 0.6 * WX.fog);
+  scene.fog.far = C.fogFar * (quality === 'low' ? 0.75 : quality === 'ultra' ? 1.55 : quality === 'high' ? 1.25 : 1) * (1 - 0.15 * WX.cloud - 0.3 * WX.rain - 0.6 * WX.fog);
   if (renderer) renderer.setClearColor(wxC.fog);
   sun.visible = !!C.sun && WX.cloud < 0.6 && WX.fog < 0.6;
   if (C.sun) { sun.material.color.set(C.sun); sun.material.transparent = true; sun.material.opacity = clamp(1 - WX.cloud * 1.6 - WX.fog * 1.6, 0, 1); }
@@ -578,6 +648,18 @@ function labelTexture(text, sub, color) {
   g.fillStyle = color || '#ff3d7f'; g.fillRect((512 - w) / 2, 8, 8, sub ? 108 : 76);
   g.fillStyle = '#f3efe7'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, 256, 46, 460);
   if (sub) { g.font = '700 26px "Archivo", sans-serif'; g.fillStyle = '#c9c4ba'; g.fillText(sub.toUpperCase(), 256, 92, 460); }
+  const t = new THREE.CanvasTexture(cv); t.anisotropy = 4;
+  return t;
+}
+function shopSignTexture(text, bg) {
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 64;
+  const g = cv.getContext('2d');
+  const grd = g.createLinearGradient(0, 0, 0, 64); grd.addColorStop(0, bg); grd.addColorStop(1, new THREE.Color(bg).multiplyScalar(0.7).getStyle());
+  g.fillStyle = grd; g.fillRect(0, 0, 256, 64);
+  g.strokeStyle = 'rgba(255,255,255,.35)'; g.lineWidth = 2; g.strokeRect(3, 3, 250, 58);
+  let size = 34; g.font = `800 ${size}px "Archivo", "Arial", sans-serif`;
+  while (g.measureText(text).width > 236 && size > 14) { size -= 2; g.font = `800 ${size}px "Archivo", "Arial", sans-serif`; }
+  g.fillStyle = '#fbf7ee'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, 128, 34, 240);
   const t = new THREE.CanvasTexture(cv); t.anisotropy = 4;
   return t;
 }

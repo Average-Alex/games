@@ -58,7 +58,7 @@ povSel.addEventListener('change', () => setPov(povSel.value));
 $('#sens').value = sens;
 $('#sens').addEventListener('input', (e) => { sens = parseFloat(e.target.value); store.set('wc-sens', sens); });
 const qualSel = $('#quality'); qualSel.value = quality;
-qualSel.addEventListener('change', () => { quality = qualSel.value; store.set('wc-quality', quality); applyQuality(); setupSky(); if (MAP) { clearTiles(); setupMapMaterials(); applyWeather(0, true); updateTiles(S.x, S.z, true); } });
+qualSel.addEventListener('change', () => { quality = qualSel.value; store.set('wc-quality2', quality); applyQuality(); setupSky(); if (MAP) { clearTiles(); setupMapMaterials(); applyWeather(0, true); updateTiles(S.x, S.z, true); } });
 const wxSel = $('#weatherSel'); wxSel.value = WX.mode;
 wxSel.addEventListener('change', () => { WX.mode = wxSel.value; store.set('wc-weather', WX.mode); if (WX.mode !== 'auto') { WX.from = WX.to = WX.mode; WX.t = 1; WX.wet = WX.mode === 'rain' ? 1 : 0; applyWeather(0, true); } });
 const respSel = $('#respawnMode'); respSel.value = store.get('wc-respawn', 'crash');
@@ -210,7 +210,7 @@ function renderBails() {
 
 // ---------------------------------------------------------------- input
 const keys = new Set();
-const GAME_KEYS = ['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'ShiftLeft', 'ShiftRight', 'KeyR', 'KeyM', 'KeyV', 'KeyN', 'KeyP', 'KeyE', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'];
+const GAME_KEYS = ['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'ShiftLeft', 'ShiftRight', 'KeyR', 'KeyM', 'KeyV', 'KeyN', 'KeyP', 'KeyE', 'KeyF', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'];
 let noLock = false;
 addEventListener('keydown', (e) => {
   if (e.target && e.target.tagName === 'INPUT') return;          // typing in the map search box
@@ -231,9 +231,16 @@ addEventListener('keydown', (e) => {
     }
     if (e.code === 'KeyR' && !S.crashed) { respawn(); popup('Reset'); }
     if (e.code === 'KeyM') toggleMute();
-    if (e.code === 'KeyE') {
-      if (S.riding && RIDE.train) { if (RIDE.train.atSt && RIDE.train.dwell > 0) leaveTrain(); else popup('Wait for the next stop'); }
-      else if (RIDE.near && !S.crashed) boardTrain(RIDE.near);
+    if (e.code === 'KeyE' || e.code === 'KeyF') {
+      const t = RIDE.train;
+      if (S.riding && t) {
+        if (e.code === 'KeyF') reverseTrain();
+        else if (canLeave(t)) leaveTrain(); else popup(t.atSt ? 'Departing…' : 'Wait for the next stop');
+      } else if (RIDE.near && !S.crashed) {
+        // E: towards the last station of the line (or the only way), F: towards the first
+        const ends = lineEnds(RIDE.near);
+        boardTrain(RIDE.near, e.code === 'KeyE' ? (ends.plus ? 1 : -1) : -1);
+      }
     }
     if (e.code === 'KeyN') toggleMap();
     if (e.code === 'KeyP' || (e.code === 'Escape' && noLock)) pause();
@@ -820,7 +827,7 @@ function updateUnits(d) {
     u.rock = (u.rock || 0) * Math.exp(-d * 2.5);
     u.body.rotation.z = Math.sin(simTime * 18) * u.rock; u.body.rotation.x = Math.sin(simTime * 13) * u.rock * 0.5;
   }
-  if (cars < C.traffic * (quality === 'low' ? 0.7 : 1) && Math.random() < d * 3) { const u = units.find((x) => !x.on && x.kind === 'car'); if (u) activate(u, false); }
+  if (cars < C.traffic * (quality === 'low' ? 0.7 : quality === 'ultra' ? 1.4 : 1) && Math.random() < d * 3) { const u = units.find((x) => !x.on && x.kind === 'car'); if (u) activate(u, false); }
   if (heli.on) {
     const tx = S.x + Math.sin(S.psi) * S.v * 1.2, tz = S.z + Math.cos(S.psi) * S.v * 1.2;
     const dx = tx - heli.x, dz = tz - heli.z, dd = Math.hypot(dx, dz) || 1;
@@ -1181,8 +1188,9 @@ function updateHUD(dt) {
 // ---------------------------------------------------------------- main loop
 function frame(now) {
   requestAnimationFrame(frame);
-  const dt = clamp((now - last) / 1000, 0, 0.05); last = now;
+  const rawMs = now - last, dt = clamp(rawMs / 1000, 0, 0.05); last = now;
   if (!MAP || !rig) { if (renderer) renderer.render(scene, camera); return; }
+  governFrame(rawMs, state === 'play' && !mapOpen && rawMs < 500);
   if (state === 'play' && !mapOpen) {
     if (S.hitStop > 0) { S.hitStop -= dt; }
     else {
@@ -1214,7 +1222,7 @@ function frame(now) {
   flashV *= Math.exp(-dt * 4);
   $('#flash').style.opacity = String(flashV);
   sfx.update(dt);
-  renderer.render(scene, camera);
+  renderScene();
 }
 
 // ---------------------------------------------------------------- start

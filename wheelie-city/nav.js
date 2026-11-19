@@ -404,44 +404,97 @@ bmCv.addEventListener('contextmenu', (ev) => { ev.preventDefault(); clearRoute()
 $('#navClear').addEventListener('click', () => clearRoute());
 $('#navMe').addEventListener('click', () => { bmCenterOn(S.x, S.z, 3000); });
 
-// Search: municipalities, neighbourhoods and streets
+// Search: cities, neighbourhoods, stations, landmarks, schools, malls, stores and streets, with a ranked type-ahead list
+const KIND_LABEL = { city: 'City', neighbourhood: 'Neighbourhood', suburb: 'Neighbourhood', quarter: 'Neighbourhood', borough: 'Borough', village: 'Neighbourhood',
+  station: 'Station', street: 'Street', building: 'Building', school: 'School', college: 'College', university: 'University', hospital: 'Hospital', mall: 'Mall',
+  stadium: 'Stadium', museum: 'Museum', attraction: 'Attraction', landmark: 'Landmark', park: 'Park', library: 'Library', theatre: 'Theatre', casino: 'Casino' };
+const KIND_RANK = { city: 0, station: 1, mall: 1, stadium: 1, landmark: 1, attraction: 1, museum: 1, school: 2, college: 2, university: 2, hospital: 2, park: 2, neighbourhood: 2, suburb: 2, quarter: 2, borough: 2, building: 3, street: 3 };
 function buildNavIndex() {
-  const m = MAP, list = new Map();
-  // municipality centres from the boundary raster
+  const m = MAP, list = [], seen = new Set();
+  const add = (name, kind, x, z, extra) => {
+    if (!name) return;
+    const key = `${name.toLowerCase()}|${kind}|${Math.round(x / 200)}|${Math.round(z / 200)}`;
+    if (seen.has(key)) return; seen.add(key);
+    list.push({ name, kind, x, z, low: name.toLowerCase(), ...extra });
+  };
   const acc = new Map();
   for (let r = 0; r < m.MH; r += 2) for (let c = 0; c < m.MW; c += 2) { const v = m.muni[r * m.MW + c]; if (!v) continue; const a = acc.get(v) || [0, 0, 0]; a[0] += c; a[1] += r; a[2]++; acc.set(v, a); }
-  for (const [v, a] of acc) if (a[2] > 60) list.set(`${m.munis[v]} (city)`, { x: m.gx0 + (a[0] / a[2] + 0.5) * m.mres, z: m.gz0 + (a[1] / a[2] + 0.5) * m.mres, name: m.munis[v] });
-  for (const p of m.towns) if (![...list.keys()].some((k) => k.startsWith(p[0] + ' ('))) list.set(`${p[0]} (city)`, { x: p[2], z: p[3], name: p[0] });
-  for (const p of m.places) if (p[2] > m.gx0 && p[2] < m.gx1 && p[3] > m.gz0 && p[3] < m.gz1) list.set(`${p[0]} (${p[1]})`, { x: p[2], z: p[3], name: p[0] });
+  for (const [v, a] of acc) if (a[2] > 60) add(m.munis[v], 'city', m.gx0 + (a[0] / a[2] + 0.5) * m.mres, m.gz0 + (a[1] / a[2] + 0.5) * m.mres);
+  for (const p of m.towns) add(p[0], 'city', p[2], p[3]);
+  for (const p of m.places) add(p[0], p[1], p[2], p[3]);
+  for (const ln of m.lines) for (const st of ln.stations) add(st.name, 'station', st.x, st.z);
+  for (const [nm, kind, x, z] of m.pois) add(nm, kind, x, z);
+  for (let b = 0; b < m.B; b++) if (m.bName[b]) { const bb = b * 4; add(m.names[m.bName[b]], 'building', (m.bBox[bb] + m.bBox[bb + 2]) / 2, (m.bBox[bb + 1] + m.bBox[bb + 3]) / 2); }
+  for (const [nm, kind, x, z] of m.shops) add(nm, kind, x, z, { shop: true });
   const streets = new Set();
-  for (let e = 0; e < m.E; e++) { if (!routable(e)) continue; const nm = m.names[m.eName[e]]; if (nm) streets.add(nm); }
-  for (const s of [...streets].sort()) list.set(`${s} (street)`, { street: s, name: s });
+  for (let e = 0; e < m.E; e++) { if (!routable(e)) continue; const nm = m.names[m.eName[e]]; if (nm && !streets.has(nm)) { streets.add(nm); list.push({ name: nm, kind: 'street', street: nm, low: nm.toLowerCase() }); } }
   NAV.entries = list;
-  const dl = $('#navList'); dl.innerHTML = '';
-  const frag = document.createDocumentFragment();
-  for (const k of list.keys()) { const o = document.createElement('option'); o.value = k; frag.appendChild(o); }
-  dl.appendChild(frag);
 }
-function goToEntry(text) {
+function searchPlaces(q, max = 10) {
   if (!NAV.entries) buildNavIndex();
-  let en = NAV.entries.get(text);
-  if (!en) { const low = text.trim().toLowerCase(); for (const [k, v] of NAV.entries) if (k.toLowerCase().startsWith(low)) { en = v; break; } }
-  if (!en) { $('#bmHint').textContent = `Couldn't find "${text}"`; return; }
-  let x = en.x, z = en.z;
-  if (en.street) {
-    // nearest stretch of that street to you
-    const m = MAP; let bd = Infinity;
-    for (let e = 0; e < m.E; e++) {
-      if (m.names[m.eName[e]] !== en.street) continue;
-      const i = (m.eOff[e] + m.eOff[e + 1] - 1) >> 1, d = Math.hypot(m.px[i] - S.x, m.pz[i] - S.z);
-      if (d < bd) { bd = d; x = m.px[i]; z = m.pz[i]; }
-    }
+  const low = q.trim().toLowerCase(); if (!low) return [];
+  const hits = [];
+  for (const en of NAV.entries) {
+    const i = en.low.indexOf(low); if (i < 0) continue;
+    const word = i === 0 ? 0 : en.low[i - 1] === ' ' || en.low[i - 1] === '-' ? 1 : 2;
+    const d = en.x !== undefined ? Math.hypot(en.x - S.x, en.z - S.z) : 3000;
+    const rank = word * 10 + (en.low === low ? -5 : 0) + (en.shop ? 3 : KIND_RANK[en.kind] ?? 3) + Math.min(4, d / 2500);
+    hits.push([rank, en, d]);
   }
+  hits.sort((a, b) => a[0] - b[0]);
+  // one entry per name for chains: keep the nearest branch
+  const out = [], names = new Set();
+  for (const [, en, d] of hits) { const k = en.low + (en.shop ? '' : en.kind); if (names.has(k)) continue; names.add(k); out.push([en, d]); if (out.length >= max) break; }
+  return out;
+}
+function entryPoint(en) {
+  if (!en.street) return [en.x, en.z];
+  const m = MAP; let bd = Infinity, x = 0, z = 0;
+  for (let e = 0; e < m.E; e++) {
+    if (m.names[m.eName[e]] !== en.street) continue;
+    const i = (m.eOff[e] + m.eOff[e + 1] - 1) >> 1, d = Math.hypot(m.px[i] - S.x, m.pz[i] - S.z);
+    if (d < bd) { bd = d; x = m.px[i]; z = m.pz[i]; }
+  }
+  return [x, z];
+}
+function goToEntry(en) {
+  const [x, z] = entryPoint(en);
   if (setDestination(x, z, en.name)) {
     popup(`Destination: ${route.dest.name}`, 'place');
-    const v = NAV.view; if (v) { bmCenterOn((S.x + x) / 2, (S.z + z) / 2, Math.max(2500, Math.hypot(x - S.x, z - S.z) * 1.5)); }
+    if (NAV.view) bmCenterOn((S.x + x) / 2, (S.z + z) / 2, Math.max(2500, Math.hypot(x - S.x, z - S.z) * 1.5));
     $('#bmHint').textContent = `${route.dest.name}: ${fmtDist(route.total)} · press N or Esc to ride`;
   }
+  hideSugg();
 }
-$('#navSearch').addEventListener('keydown', (ev) => { ev.stopPropagation(); if (ev.key === 'Enter') { goToEntry(ev.target.value); ev.target.blur(); } if (ev.key === 'Escape') ev.target.blur(); });
-$('#navSearch').addEventListener('change', (ev) => { if (NAV.entries && NAV.entries.has(ev.target.value)) { goToEntry(ev.target.value); ev.target.blur(); } });
+const suggEl = $('#navSugg'), searchEl = $('#navSearch');
+let suggItems = [], suggSel = 0;
+function hideSugg() { suggEl.hidden = true; searchEl.setAttribute('aria-expanded', 'false'); }
+function showSugg() {
+  suggItems = searchPlaces(searchEl.value);
+  suggSel = 0;
+  suggEl.innerHTML = '';
+  if (!suggItems.length) { hideSugg(); if (searchEl.value.trim()) $('#bmHint').textContent = `Nothing called "${searchEl.value}" on this map`; return; }
+  suggItems.forEach(([en, d], i) => {
+    const b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'option'); b.setAttribute('aria-selected', String(i === suggSel));
+    const kind = en.shop ? (en.kind || 'store').replace(/_/g, ' ') : KIND_LABEL[en.kind] || en.kind.replace(/_/g, ' ');
+    const nm = document.createElement('b'); nm.textContent = en.name;
+    const sub = document.createElement('span'); sub.textContent = `${kind.charAt(0).toUpperCase() + kind.slice(1)}${en.x !== undefined ? ` · ${fmtDist(d)}` : ''}`;
+    b.append(nm, sub);
+    b.addEventListener('mousedown', (ev) => ev.preventDefault());
+    b.addEventListener('click', () => { searchEl.value = en.name; goToEntry(en); searchEl.blur(); });
+    suggEl.appendChild(b);
+  });
+  suggEl.hidden = false; searchEl.setAttribute('aria-expanded', 'true');
+}
+searchEl.addEventListener('input', showSugg);
+searchEl.addEventListener('focus', () => { if (searchEl.value.trim()) showSugg(); });
+searchEl.addEventListener('blur', () => setTimeout(hideSugg, 150));
+searchEl.addEventListener('keydown', (ev) => {
+  ev.stopPropagation();
+  if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+    ev.preventDefault(); if (!suggItems.length) return;
+    suggSel = (suggSel + (ev.key === 'ArrowDown' ? 1 : suggItems.length - 1)) % suggItems.length;
+    [...suggEl.children].forEach((c, i) => c.setAttribute('aria-selected', String(i === suggSel)));
+  } else if (ev.key === 'Enter') { const it = suggItems[suggSel] || searchPlaces(searchEl.value, 1)[0]; if (it) { searchEl.value = it[0].name; goToEntry(it[0]); searchEl.blur(); } }
+  else if (ev.key === 'Escape') { hideSugg(); searchEl.blur(); }
+});

@@ -43,7 +43,7 @@ function mergeColored(parts) {
 function buildPeds() {
   for (const p of peds) { scene.remove(p.g); p.g.traverse((o) => o.geometry && o.geometry.dispose()); }
   peds.length = 0;
-  const N = quality === 'low' ? 14 : quality === 'high' ? 40 : 28;
+  const N = quality === 'low' ? 14 : quality === 'ultra' ? 56 : quality === 'high' ? 40 : 28;
   for (let i = 0; i < N; i++) {
     const r = mulberry(i * 977 + 13), skin = pick(r, PED_SKIN), top = pick(r, PED_TOP), legs = pick(r, PED_LEGS), hair = pick(r, PED_HAIR);
     const g = new THREE.Group(), body = new THREE.Group(); g.add(body);
@@ -273,47 +273,69 @@ function stationNear(x, z, r) {
   }
   return best;
 }
-function boardTrain(st) {
-  const ln = MAP.lines[st.line], L = LIVERY[cityKey] || LIVERY.van;
+// Ends of the line a station's trains run to: +1 towards the last station, -1 towards the first
+function lineEnds(st) {
+  const ln = MAP.lines[st.line], first = ln.stations[0], last = ln.stations[ln.stations.length - 1];
+  return { plus: st === last || st.s > ln.len - 120 ? null : last, minus: st === first || st.s < 120 ? null : first };
+}
+function boardTrain(st, dir) {
+  const ln = MAP.lines[st.line], ends = lineEnds(st);
+  if (dir > 0 && !ends.plus) dir = -1;
+  if (dir < 0 && !ends.minus) dir = 1;
   let t = trains.find((x) => x.on && x.line === ln.id && !x.mine && Math.abs(x.s - st.s) < 400) || trains.find((x) => !x.on) || trains[0];
-  // head the way you're facing (or the only way there is)
-  const P = linePoint(ln, st.s, {});
-  let dir = P.dx * Math.sin(S.psi) + P.dz * Math.cos(S.psi) >= 0 ? 1 : -1;
-  if (st.s > ln.len - 120) dir = -1; if (st.s < 120) dir = 1;
-  Object.assign(t, { on: true, line: ln.id, s: st.s, dir, v: 0, dwell: 3, mine: true, nextSt: null, atSt: st });
+  Object.assign(t, { on: true, line: ln.id, s: st.s, dir, v: 0, dwell: 3, mine: true, nextSt: null, atSt: st, boardSt: st, departed: false });
   t.g.visible = true; placeTrain(t);
   RIDE.on = true; RIDE.train = t; S.riding = true; S.v = 0; S.thr = 0;
   if (W.active) W = { active: false };
   rig.root.visible = false;
-  popup(`${TRANSIT[cityKey] || 'Train'} · ${st.name}`, 'place');
-  if (stars()) popup('Cops can\'t follow you on here', 'good');
-  camSnap = true; void L;
+  popup(`${TRANSIT[cityKey] || 'Train'} to ${(dir > 0 ? ends.plus : ends.minus).name}`, 'place');
+  if (stars()) popup('Cops can’t follow you on here', 'good');
+  camSnap = true;
 }
+// You can get off once the train has left the station you boarded at
+const canLeave = (t) => t.atSt && t.dwell > 0 && (t.departed || t.atSt !== t.boardSt);
 function leaveTrain() {
   const t = RIDE.train, st = t && t.atSt;
-  if (!st) return;
+  if (!st || !canLeave(t)) return;
   RIDE.on = false; S.riding = false; t.mine = false; RIDE.train = null;
   rig.root.visible = true;
   placeOnRoad(st.x, st.z, Math.atan2(-(st.px - st.x), -(st.pz - st.z)) || 0, 0, false);
   popup(st.name, 'place'); camSnap = true;
 }
+// At a stop: switch to the train going back the other way
+function reverseTrain() {
+  const t = RIDE.train; if (!t || !t.atSt || t.dwell <= 0) return;
+  const ends = lineEnds(t.atSt), dir = -t.dir, to = dir > 0 ? ends.plus : ends.minus;
+  if (!to) { popup('End of the line'); return; }
+  t.dir = dir; t.nextSt = null; t.dwell = Math.max(t.dwell, 3); t.boardSt = t.atSt; t.departed = false;
+  popup(`Now heading to ${to.name}`, 'place'); camSnap = true;
+}
 function updateRide(d) {
   const prompt = $('#prompt');
   if (S.riding && RIDE.train) {
     const t = RIDE.train;
+    if (t.v > 1) t.departed = true;
+    linePoint(MAP.lines[t.line], t.s, TP);
     S.x = t.x; S.z = t.z; S.v = t.v; S.psi = Math.atan2(TP.dx * t.dir, TP.dz * t.dir);
-    linePoint(MAP.lines[t.line], t.s, TP); S.psi = Math.atan2(TP.dx * t.dir, TP.dz * t.dir);
     // nobody can see you on the train
     unseenT += d * 2;
-    const ns = t.atSt || nextStation(t);
+    const ends = lineEnds(t.atSt || nextStation(t) || MAP.lines[t.line].stations[0]), to = (t.dir > 0 ? ends.plus : ends.minus) || { name: 'end of the line' };
     prompt.hidden = false;
-    prompt.innerHTML = t.atSt && t.dwell > 0 ? `<kbd>E</kbd> Get off at <b>${esc(t.atSt.name)}</b>` : `Next stop: <b>${esc(ns ? ns.name : 'end of the line')}</b>`;
+    if (t.atSt && t.dwell > 0 && !canLeave(t)) prompt.innerHTML = `Departing to <b>${esc(to.name)}</b>…`;
+    else if (t.atSt && t.dwell > 0) {
+      const back = t.dir > 0 ? ends.minus : ends.plus;
+      prompt.innerHTML = `<kbd>E</kbd> Get off at <b>${esc(t.atSt.name)}</b>${back ? ` &nbsp; <kbd>F</kbd> Ride back to <b>${esc(back.name)}</b>` : ''}`;
+    } else { const ns = nextStation(t); prompt.innerHTML = `To <b>${esc(to.name)}</b> · next stop <b>${esc(ns ? ns.name : 'end of the line')}</b>`; }
     return;
   }
   const st = !S.crashed && S.v < 4 ? stationNear(S.x, S.z, 40) : null;
   RIDE.near = st;
-  if (st) { prompt.hidden = false; prompt.innerHTML = `<kbd>E</kbd> Ride the ${TRANSIT[cityKey] || 'train'} from <b>${esc(st.name)}</b>`; }
-  else prompt.hidden = true;
+  if (st) {
+    const ends = lineEnds(st), opts = [];
+    if (ends.plus) opts.push(`<kbd>E</kbd> to <b>${esc(ends.plus.name)}</b>`);
+    if (ends.minus) opts.push(`<kbd>${ends.plus ? 'F' : 'E'}</kbd> to <b>${esc(ends.minus.name)}</b>`);
+    prompt.hidden = false; prompt.innerHTML = `${esc(st.name)} · ${opts.join(' &nbsp; ')}`;
+  } else prompt.hidden = true;
 }
 function trainCamera(dt) {
   const t = RIDE.train, ln = MAP.lines[t.line];

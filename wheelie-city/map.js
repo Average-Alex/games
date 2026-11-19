@@ -183,6 +183,15 @@ async function decodeMap(meta, b64) {
     for (let k = 0; k < tI.length; k += 2) {
       const st = tI[k], cnt = tI[k + 1], xs = new Float32Array(cnt), zs = new Float32Array(cnt), cs = new Float32Array(cnt), fl = new Uint8Array(cnt), hs = new Float32Array(cnt);
       for (let i = 0; i < cnt; i++) { xs[i] = tP[2 * (st + i)] * u; zs[i] = tP[2 * (st + i) + 1] * u; fl[i] = tF[st + i]; if (i) cs[i] = cs[i - 1] + Math.hypot(xs[i] - xs[i - 1], zs[i] - zs[i - 1]); }
+      // Stations and short stretches between bridges are often not tagged as bridge or tunnel in OSM, which made the
+      // track dip to the ground and climb back up. Fill gaps under 600 m that have the same level on both sides.
+      for (let i = 0; i < cnt;) {
+        if (fl[i] !== 0) { i++; continue; }
+        let j = i; while (j < cnt && fl[j] === 0) j++;
+        const before = i > 0 ? fl[i - 1] : -1, after = j < cnt ? fl[j] : -1, len = cs[Math.min(j, cnt - 1)] - cs[Math.max(0, i - 1)];
+        if (before > 0 && before === after && len < 600) for (let k = i; k < j; k++) fl[k] = before;
+        i = j;
+      }
       // height: elevated 7.5 m, underground -9 m; ramps on the elevated/tunnel side of each change, ground stays at 0
       const dGround = new Float32Array(cnt).fill(1e9);
       let last = -1e9; for (let i = 0; i < cnt; i++) { if (fl[i] === 0) last = cs[i]; dGround[i] = cs[i] - last; }
@@ -211,6 +220,7 @@ async function decodeMap(meta, b64) {
   }
   m.pois = meta.pois || [];
   m.stops = meta.stops || [];
+  m.shops = meta.shops || [];
 
   // landcover raster (RLE) and municipalities
   m.W = meta.W; m.H = meta.H; m.res = meta.res;
@@ -229,11 +239,12 @@ async function decodeMap(meta, b64) {
   for (let i = 0; i < m.T; i++) tTree.add(tkey(m.tx[i], m.tz[i]), i);
   // transit track pieces, bus stops, landmarks and stations by tile (heavy-rail viaducts are left out: they floated over streets)
   m.lines.forEach((r, ri) => { for (let i = 0; i < r.xs.length - 1; i++) tRail.add(tkey((r.xs[i] + r.xs[i + 1]) / 2, (r.zs[i] + r.zs[i + 1]) / 2), ri * 65536 + i); });
-  const tStop = tIdx(), tPoi = tIdx(), tSta = tIdx();
+  const tStop = tIdx(), tPoi = tIdx(), tSta = tIdx(), tShop = tIdx();
   m.stops.forEach((s, i) => tStop.add(tkey(s[0], s[1]), i));
+  m.shops.forEach((s, i) => tShop.add(tkey(s[2], s[3]), i));
   m.pois.forEach((p, i) => tPoi.add(tkey(p[2], p[3]), i));
   m.lines.forEach((ln) => ln.stations.forEach((s) => { linePoint(ln, s.s, s); tSta.add(tkey(s.px, s.pz), s); }));
-  m.tSeg = tSeg.mp; m.tNode = tNode.mp; m.tBld = tBld.mp; m.tTree = tTree.mp; m.tRail = tRail.mp; m.tStop = tStop.mp; m.tPoi = tPoi.mp; m.tSta = tSta.mp;
+  m.tSeg = tSeg.mp; m.tNode = tNode.mp; m.tBld = tBld.mp; m.tTree = tTree.mp; m.tRail = tRail.mp; m.tStop = tStop.mp; m.tPoi = tPoi.mp; m.tSta = tSta.mp; m.tShop = tShop.mp;
   m.names = meta.names; m.munis = meta.munis;
   m.places = meta.places.filter((p) => ['neighbourhood', 'suburb', 'quarter', 'borough', 'village'].includes(p[1]));
   m.towns = meta.places.filter((p) => p[1] === 'city' || p[1] === 'town');
@@ -422,12 +433,22 @@ function setupMapMaterials() {
   MM.signs = C.signs.map(([t, c]) => { const tex = signTexture(t, c); return new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }); });
   MM.landCol = Object.fromEntries(Object.entries(C.land).map(([k, v]) => [k, new THREE.Color(v)]));
 }
-function streetSignMat(text) {
-  let v = signTexCache.get(text);
-  if (!v) { const tex = streetSignTexture(text); v = { tex, mat: new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }), refs: 0 }; signTexCache.set(text, v); }
+function acquireSign(key, makeTex, lit) {
+  let v = signTexCache.get(key);
+  if (!v) {
+    const tex = makeTex();
+    const mat = lit ? new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide, emissive: '#ffffff', emissiveMap: tex, emissiveIntensity: C.night || C.dusk ? 0.75 : 0.12 })
+      : new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
+    v = { tex, mat, refs: 0 }; signTexCache.set(key, v);
+  }
   v.refs++;
   return v.mat;
 }
+const streetSignMat = (text) => acquireSign(text, () => streetSignTexture(text), false);
+// Real business names over the shop door, coloured by what kind of place it is
+const SHOP_COL = { cafe: '#5a3a28', restaurant: '#8a1c2a', fast_food: '#c8102e', bar: '#4a2a6a', pub: '#2a4a2a', bank: '#1f3f7a', pharmacy: '#1f7a4a',
+  supermarket: '#2a7a3a', convenience: '#1f5f9a', clothes: '#222226', casino: '#8a1c6a', cinema: '#6a1a1a', ice_cream: '#d84a8a', bakery: '#a0682a', fuel: '#c8102e', nightclub: '#3a1a5a' };
+const shopSignMat = (name, kind) => { const col = SHOP_COL[kind] || ['#1f5f9a', '#2a2a2e', '#7a3a2a', '#2a6a6a', '#5a2a5a', '#3a4a2a'][Math.floor(hash2(name.length, name.charCodeAt(0) || 0, 3) * 6)]; return [acquireSign(`shop|${name}|${col}`, () => shopSignTexture(name, col), true), `shop|${name}|${col}`]; };
 function releaseSign(text) {
   const v = signTexCache.get(text); if (!v) return;
   if (--v.refs <= 0) { v.tex.dispose(); v.mat.dispose(); signTexCache.delete(text); }
@@ -505,7 +526,7 @@ const STOP_GEO = {
 // ---------------------------------------------------------------- streamed tiles
 const tiles = new Map();
 const liveSignals = new Set();
-function tileRadius() { return quality === 'low' ? 2 : 3; }
+function tileRadius() { return Math.max(2, (quality === 'low' ? 2 : quality === 'ultra' ? 4 : 3) - GOV.dropRadius); }
 function disposeTile(t) {
   for (const part of ['base', 'detail']) if (t[part]) disposePart(t, part);
   tiles.delete(t.key);
@@ -633,13 +654,18 @@ function buildBase(t) {
       // deck underside
       fascia.flat(ax - amx * (hw + 0.3), az - amz * (hw + 0.3), bx - bmx * (hw + 0.3), bz - bmz * (hw + 0.3), bx + bmx * (hw + 0.3), bz + bmz * (hw + 0.3), ax + amx * (hw + 0.3), az + amz * (hw + 0.3), -1.6, null, 0);
     } else if (m.eCls[e] === 0 && !(fl & F_TUNNEL)) {
-      // jersey barriers along freeways, with gaps where ramps join
-      const sMid = m.pc[i] + Math.hypot(bx - ax, bz - az) / 2, L = m.eLen[e];
-      const nearRampA = m.nodeDeg[m.eA[e]] >= 3 && sMid < 90, nearRampB = m.nodeDeg[m.eB[e]] >= 3 && L - sMid < 90;
-      if (!nearRampA && !nearRampB) for (const s of [-1, 1]) {
-        const o = hw + 0.25, x0 = ax + amx * o * s, z0 = az + amz * o * s, x1 = bx + bmx * o * s, z1 = bz + bmz * o * s;
-        barr.wall(x0, z0, x1, z1, 0, 0.85, amx * s, amz * s);
-        lineObs.push([x0, z0, x1, z1, 'Hit the barrier', 0.2]);
+      // a median barrier only: on the left of a one-way carriageway, and only where the other direction is right there.
+      // (Ramps merge on the right, so there is never a barrier between a ramp and the freeway.)
+      if (fl & F_ONEWAY) {
+        const mx_ = (ax + bx) / 2 - (amx + bmx) / 2 * (hw + 6), mz_ = (az + bz) / 2 - (amz + bmz) / 2 * (hw + 6);
+        const qm = roadQuery(mx_, mz_, 12, (e2) => e2 !== e && m.eCls[e2] === 0);
+        const bx_ = (ax + bx) / 2 - (amx + bmx) / 2 * (hw + 1.5), bz_ = (az + bz) / 2 - (amz + bmz) / 2 * (hw + 1.5);
+        const ramp = roadQuery(bx_, bz_, 10, (e2) => e2 !== e && m.eCls[e2] !== 0);   // any ramp or road alongside: leave it open
+        if (qm.e >= 0 && qm.d < qm.hw + 3 && !(ramp.e >= 0 && ramp.d < ramp.hw + 2.5)) {
+          const o = hw + 0.25, x0 = ax - amx * o, z0 = az - amz * o, x1 = bx - bmx * o, z1 = bz - bmz * o;
+          barr.wall(x0, z0, x1, z1, 0, 0.85, -amx, -amz);
+          lineObs.push([x0, z0, x1, z1, 'Hit the barrier', 0.2]);
+        }
       }
     }
   }
@@ -684,7 +710,15 @@ function buildBase(t) {
   // Buildings. Style comes from the mapped material or the building type; colour from OSM where it's mapped.
   const STY = ['house', 'mid', 'glass', 'brick', 'industrial', 'stone', 'shop'];
   const W = Object.fromEntries(STY.map((st) => [st, new GeoBuf(true, true)])), roof = new GeoBuf(true);
-  const signs = [], labels = [], domes = [];
+  const signs = [], labels = [], domes = [], shopSigns = [];
+  // real businesses (shop / cafe / restaurant nodes) matched to the building they're in
+  const shopsIn = new Map();
+  for (const si of m.tShop.get(t.key) || []) {
+    const sh = m.shops[si], bi = buildingAt(sh[2], sh[3], 3);
+    if (bi < 0) continue;
+    let arr = shopsIn.get(bi); if (!arr) shopsIn.set(bi, arr = []);
+    if (arr.length < 6 && !arr.some((o) => o[0] === sh[0])) arr.push(sh);
+  }
   const MATSTY = { 1: 'brick', 2: 'glass', 3: 'mid', 4: 'house', 5: 'industrial', 6: 'stone', 7: 'mid' };
   const DIM = { house: [4, 3], mid: [3.6, 3.4], glass: [3.2, 3.9], brick: [3.4, 3.3], industrial: [6, 4.5], stone: [4, 4.2] };
   const v2 = [], bxs = [], bzs = [];
@@ -712,7 +746,7 @@ function buildBase(t) {
     const colDark = col.clone().multiplyScalar(0.55), colMid = col.clone().multiplyScalar(0.8), colPar = col.clone().multiplyScalar(0.78);
     const parapet = !gable && !(fl & 2) && h > 7 && style !== 'house';
     const wallTop = gable ? h - 2.2 : h;
-    const shop = (fl & 1) || ((kind === 0 || kind === 2 || kind === 3) && h >= 6.5 && style !== 'industrial' && style !== 'house' && absA < 6000 && hash2(b, 31) < 0.55);
+    const shop = (fl & 1) || (shopsIn.has(b) && style !== 'house' && h >= 5) || ((kind === 0 || kind === 2 || kind === 3) && h >= 6.5 && style !== 'industrial' && style !== 'house' && absA < 6000 && hash2(b, 31) < 0.55);
     const band = shop ? 4.2 : -0.3;
     const spal = C.walls.shop || WALL_DEFAULTS.shop, shopCol = new THREE.Color(spal[Math.floor(hash2(b, 33) * spal.length)]), shopDark = shopCol.clone().multiplyScalar(0.7);
     let per = 0, longest = 0, li = 0;
@@ -766,18 +800,49 @@ function buildBase(t) {
     // landmark name tags
     const nm = m.bName[b] ? m.names[m.bName[b]] : '';
     if ((fl & 8) && nm) labels.push({ text: nm, sub: '', x: cx, z: cz, y: h + 9 + ((fl & 2) ? Math.min(40, Math.sqrt(absA) * 0.2) : 0) });
-    // shop and casino signs on the longest wall
-    const shopChance = C.neon ? 0.7 : 0.33;
-    if ((kind === 3 || (kind === 0 && h < 20)) && h < 40 && longest > 7 && hash2(b, 11) < shopChance) {
+    // shop signs: real business names from the map over the street-facing wall; neon casino signs in Vegas
+    const here = shopsIn.get(b) || [], bnm = m.bName[b] ? m.names[m.bName[b]] : '';
+    if (!here.length && (fl & 1) && bnm && h < 40) here.push([bnm, 'shop', cx, cz]);
+    if (here.length && longest > 3) {
+      // the wall closest to a road is the shopfront
+      let best = -1, bd = 1e9;
+      for (let k = 0; k < n; k++) {
+        const k2 = (k + 1) % n, Lk = Math.hypot(bxs[k2] - bxs[k], bzs[k2] - bzs[k]);
+        if (Lk < 3) continue;
+        // step 3 m out from the wall: it must be open ground (not a wall shared with the building next door)
+        const onx = (bzs[k2] - bzs[k]) / Lk * sgn, onz = -(bxs[k2] - bxs[k]) / Lk * sgn;
+        const mx = (bxs[k] + bxs[k2]) / 2 + onx * 3, mz = (bzs[k] + bzs[k2]) / 2 + onz * 3;
+        if (buildingAt(mx, mz, 0.5) >= 0) continue;
+        const q = roadQuery(mx, mz, 30, (e2) => m.eCls[e2] !== 8 && !RC[m.eCls[e2]].path); const dd = q.e >= 0 ? q.d - q.hw : 99;   // a real street, not the back lane
+        if (dd < bd) { bd = dd; best = k; }
+      }
+      if (best >= 0) {
+      const k2 = (best + 1) % n, x0 = bxs[best], z0 = bzs[best], x1 = bxs[k2], z1 = bzs[k2], L = Math.hypot(x1 - x0, z1 - z0);
+      const ux = (x1 - x0) / L, uz = (z1 - z0) / L, nx = uz * sgn, nz = -ux * sgn, list = here.slice(0, Math.max(1, Math.floor(L / 3.5)));
+      const w = Math.min(4.6, L / list.length - 0.4);
+      list.forEach(([name, kind, sx, sz], k) => {
+        let along = (sx - x0) * ux + (sz - z0) * uz;
+        if (list.length > 1) along = clamp(along, (k + 0.5) * L / list.length - L / list.length * 0.4, (k + 0.5) * L / list.length + L / list.length * 0.4);
+        along = clamp(along, w / 2 + 0.2, L - w / 2 - 0.2);
+        shopSigns.push({ x: x0 + ux * along + nx * 0.16, z: z0 + uz * along + nz * 0.16, y: shop ? 3.55 : Math.min(h - 0.6, 3.6), w, rot: Math.atan2(nx, nz), name, kind });
+      });
+      }
+    } else if (C.neon && (kind === 3 || kind === 0) && h < 40 && longest > 7 && hash2(b, 11) < 0.6) {
       const k2 = (li + 1) % n, x0 = bxs[li], z0 = bzs[li], x1 = bxs[k2], z1 = bzs[k2], L = longest;
-      const nx = (z1 - z0) / L * sgn, nz = -(x1 - x0) / L * sgn, w = Math.min(L - 2, C.neon ? 9 : 6);
-      signs.push({ x: (x0 + x1) / 2 + nx * 0.14, z: (z0 + z1) / 2 + nz * 0.14, y: (C.neon ? 5 + hash2(b, 2) * 6 : shop ? 3.45 : 3.6), w: shop ? Math.min(w, 4) : w, rot: Math.atan2(nx, nz), mat: Math.floor(hash2(b, 13) * MM.signs.length), small: shop && !C.neon });
+      const nx = (z1 - z0) / L * sgn, nz = -(x1 - x0) / L * sgn, w = Math.min(L - 2, 9);
+      signs.push({ x: (x0 + x1) / 2 + nx * 0.14, z: (z0 + z1) / 2 + nz * 0.14, y: 5 + hash2(b, 2) * 6, w, rot: Math.atan2(nx, nz), mat: Math.floor(hash2(b, 13) * MM.signs.length) });
     }
   }
   for (const st of STY) if (!W[st].empty) addMesh(W[st].build(), MM.walls[st], { cast: true });
   if (!roof.empty) addMesh(roof.build(), MM.roof, { cast: true });
   for (const s of signs) {
-    const geo = new THREE.PlaneGeometry(s.w, s.w * (s.small ? 0.2 : 0.31)), me = new THREE.Mesh(geo, MM.signs[s.mat]);
+    const geo = new THREE.PlaneGeometry(s.w, s.w * 0.31), me = new THREE.Mesh(geo, MM.signs[s.mat]);
+    me.position.set(s.x, s.y, s.z); me.rotation.y = s.rot; g.add(me); disp.push(geo);
+  }
+  const signKeys = [];
+  for (const s of shopSigns) {
+    const [mat, key] = shopSignMat(s.name, s.kind); signKeys.push(key);
+    const geo = new THREE.PlaneGeometry(s.w, Math.min(0.95, s.w * 0.25)), me = new THREE.Mesh(geo, mat);
     me.position.set(s.x, s.y, s.z); me.rotation.y = s.rot; g.add(me); disp.push(geo);
   }
   for (const d of domes) {
@@ -800,16 +865,20 @@ function buildBase(t) {
     strip(0, 1.5, ballast); strip(0.72, 0.05, steel); strip(-0.72, 0.05, steel);
     if (h0 > 0.4 || h1 > 0.4) {
       // single-track guideway: sides and underside (the deck is the track bed above)
-      const w = 1.7, a0 = Math.max(0, h0), a1 = Math.max(0, h1);
-      for (const s of [-1, 1]) quad(rail, x0 + nx * w * s, z0 + nz * w * s, x1 + nx * w * s, z1 + nz * w * s, a0 - 1.3, a1 - 1.3, a0 + 0.35, a1 + 0.35, nx * s, 0, nz * s);
-      rail.v(x0 - nx * w, a0 - 1.3, z0 - nz * w, 0, -1, 0); rail.v(x1 + nx * w, a1 - 1.3, z1 + nz * w, 0, -1, 0); rail.v(x1 - nx * w, a1 - 1.3, z1 - nz * w, 0, -1, 0);
-      rail.v(x0 - nx * w, a0 - 1.3, z0 - nz * w, 0, -1, 0); rail.v(x0 + nx * w, a0 - 1.3, z0 + nz * w, 0, -1, 0); rail.v(x1 + nx * w, a1 - 1.3, z1 + nz * w, 0, -1, 0);
-      // pillars every 30 m
-      for (let s = Math.ceil(ln.cs[i] / 30) * 30; s < ln.cs[i + 1]; s += 30) {
-        const f = (s - ln.cs[i]) / L, hh = h0 + (h1 - h0) * f; if (hh < 2.5) continue;
-        const px = x0 + (x1 - x0) * f, pz = z0 + (z1 - z0) * f, r = 0.65, SEG = 8;
-        for (let k = 0; k < SEG; k++) { const b0 = k / SEG * TAU, b1 = (k + 1) / SEG * TAU, c0 = Math.cos(b0), s0 = Math.sin(b0), c1 = Math.cos(b1), s1 = Math.sin(b1); rail.wall(px + c0 * r, pz + s0 * r, px + c1 * r, pz + s1 * r, 0, hh - 1.3, (c0 + c1) / 2, (s0 + s1) / 2); }
-        obs.push([px, pz, 0.75, 'Hit a pillar']);
+      // single-track box girder: sides with a parapet lip, underside
+      const w = 1.9, a0 = Math.max(0, h0), a1 = Math.max(0, h1), D = 1.7;
+      for (const s of [-1, 1]) quad(rail, x0 + nx * w * s, z0 + nz * w * s, x1 + nx * w * s, z1 + nz * w * s, a0 - D, a1 - D, a0 + 0.55, a1 + 0.55, nx * s, 0, nz * s);
+      rail.v(x0 - nx * w, a0 - D, z0 - nz * w, 0, -1, 0); rail.v(x1 + nx * w, a1 - D, z1 + nz * w, 0, -1, 0); rail.v(x1 - nx * w, a1 - D, z1 - nz * w, 0, -1, 0);
+      rail.v(x0 - nx * w, a0 - D, z0 - nz * w, 0, -1, 0); rail.v(x0 + nx * w, a0 - D, z0 + nz * w, 0, -1, 0); rail.v(x1 + nx * w, a1 - D, z1 + nz * w, 0, -1, 0);
+      // round piers every 25 m with a cap under the girder (and short stubs where the ramp is low)
+      for (let s = Math.ceil(ln.cs[i] / 25) * 25; s < ln.cs[i + 1]; s += 25) {
+        const f = (s - ln.cs[i]) / L, hh = h0 + (h1 - h0) * f; if (hh < D + 0.3) continue;
+        const px = x0 + (x1 - x0) * f, pz = z0 + (z1 - z0) * f, r = 0.9, SEG = 12, top = hh - D - 0.7;
+        for (let k = 0; k < SEG; k++) { const b0 = k / SEG * TAU, b1 = (k + 1) / SEG * TAU, c0 = Math.cos(b0), s0 = Math.sin(b0), c1 = Math.cos(b1), s1 = Math.sin(b1); rail.wall(px + c0 * r, pz + s0 * r, px + c1 * r, pz + s1 * r, 0, Math.max(0.1, top), (c0 + c1) / 2, (s0 + s1) / 2); }
+        // pier cap: a block across the track direction
+        const ux = (x1 - x0) / L, uz = (z1 - z0) / L, cw = 2.6, cd = 0.8, C4 = [[-cw, -cd], [cw, -cd], [cw, cd], [-cw, cd]].map(([a, bb]) => [px + nx * a + ux * bb, pz + nz * a + uz * bb]);
+        for (let k = 0; k < 4; k++) { const [qx0, qz0] = C4[k], [qx1, qz1] = C4[(k + 1) % 4], ql = Math.hypot(qx1 - qx0, qz1 - qz0) || 1; rail.wall(qx0, qz0, qx1, qz1, Math.max(0, top), hh - D, (qz1 - qz0) / ql, -(qx1 - qx0) / ql); }
+        obs.push([px, pz, 1.0, 'Hit a pillar']);
       }
     }
     if (h0 < -0.4 || h1 < -0.4) {
@@ -851,7 +920,7 @@ function buildBase(t) {
   }
 
   scene.add(g);
-  t.base = { g, disp };
+  t.base = { g, disp, signs: signKeys };
   const allObs = obs.concat(lineObs);
   t.baseObs = allObs; t.obs = t.detail ? t.obs.concat(allObs) : allObs.slice();
 }

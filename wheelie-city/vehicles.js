@@ -111,7 +111,7 @@ function buildUnitPools() {
     decalMat: new THREE.MeshBasicMaterial({ map: decalTexture(C.cop.text, C.cop.stripe === C.cop.body ? '#111' : C.cop.stripe), transparent: true, side: THREE.DoubleSide }),
   };
   const types = ['sedan', 'sedan', 'suv', 'hatch', 'suv', 'pickup', 'van', 'sedan'];
-  const nCars = quality === 'low' ? 26 : 38;
+  const nCars = quality === 'low' ? 26 : quality === 'ultra' ? 52 : 38;
   for (let i = 0; i < nCars; i++) {
     const paintIdx = i % carPaint.length, isTaxi = C.taxi && C.cars[paintIdx] === '#f2c230';
     const type = isTaxi ? 'sedan' : types[i % types.length];

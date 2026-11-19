@@ -88,6 +88,10 @@
   .bm-btn:focus-visible, .bm-bar input:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
   #bigmap .bm-hint { position: absolute; left: 12px; bottom: 8px; color: var(--ink); text-shadow: 0 1px 3px #000; max-width: 70%; }
   #bigmap .bm-attrib { position: absolute; right: 12px; bottom: 8px; font-size: 10px; letter-spacing: .08em; }
+  .sugg { position: absolute; top: 48px; right: 10px; width: min(460px, 60cqw); max-height: 60%; overflow: auto; background: rgba(16, 17, 25, .96); border: 1px solid rgba(243, 239, 231, .3); border-radius: 4px; z-index: 2; }
+  .sugg button { display: flex; justify-content: space-between; gap: 10px; width: 100%; text-align: left; padding: 7px 10px; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 14px; cursor: pointer; }
+  .sugg button:hover, .sugg button[aria-selected="true"] { background: rgba(255, 61, 127, .2); }
+  .sugg button span { color: var(--muted); font-size: 12px; white-space: nowrap; }
   .bm-bar .seg { background: rgba(16, 17, 25, .9); }
   .bm-respawn { position: absolute; left: 12px; top: 46px; background: rgba(16, 17, 25, .85); padding: 5px 8px; border-radius: 4px; color: var(--ink); }
   #prompt { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); font-size: 18px; font-weight: 800; padding: 8px 16px; border-radius: 4px; background: rgba(16, 17, 25, .82); border-left: 4px solid #2b6bff; white-space: nowrap; }
@@ -206,8 +210,7 @@
     <div id="bigmap" hidden>
       <canvas id="bigmapCv" width="1200" height="760" aria-label="City map. Click to set a destination."></canvas>
       <div class="bm-bar">
-        <input id="navSearch" list="navList" type="search" placeholder="Go to… city, neighbourhood or street" aria-label="Search for a destination" autocomplete="off">
-        <datalist id="navList"></datalist>
+        <input id="navSearch" type="search" placeholder="Go to… a place, street, store, school or station" aria-label="Search for a destination" autocomplete="off" role="combobox" aria-controls="navSugg" aria-expanded="false">
         <div class="seg" role="group" aria-label="What a click on the map sets">
           <button type="button" id="clickDest" aria-pressed="true">Destination</button>
           <button type="button" id="clickSpawn" aria-pressed="false">Spawn point</button>
@@ -215,6 +218,7 @@
         <button type="button" id="navClear" class="bm-btn">Clear route</button>
         <button type="button" id="navMe" class="bm-btn">Find me</button>
       </div>
+      <div id="navSugg" class="sugg" role="listbox" hidden></div>
       <div class="label bm-hint" id="bmHint">Click to set a destination · scroll to zoom · drag to pan · N or Esc to ride</div>
       <label class="opt bm-respawn" for="respawnMode">After a crash
         <select id="respawnMode">
@@ -271,6 +275,7 @@
             <option value="low">Low</option>
             <option value="med">Medium</option>
             <option value="high">High</option>
+            <option value="ultra">Ultra (auto 30 fps)</option>
           </select>
         </label>
         <label class="opt" for="weatherSel">Weather
@@ -331,6 +336,13 @@
 </main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/FXAAShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
 <script src="wheelie-city/core.js"></script>
 <script src="wheelie-city/map.js"></script>
 <script src="wheelie-city/vehicles.js"></script>

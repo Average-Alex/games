@@ -76,6 +76,9 @@ def parse_m(v):
         return None
 
 
+SHOP_AMENITY = ('restaurant', 'cafe', 'fast_food', 'bar', 'pub', 'bank', 'pharmacy', 'ice_cream', 'casino', 'cinema', 'nightclub', 'fuel', 'theatre')
+
+
 def is_station(t):
     if not t.get('name'): return False
     if t.get('railway') == 'station' or (t.get('public_transport') == 'station' and t.get('railway') != 'halt'):
@@ -90,7 +93,9 @@ def poi_kind(t):
     if t.get('historic') in ('monument', 'memorial', 'castle', 'landmark', 'building'): return 'landmark'
     if t.get('amenity') in ('theatre', 'arts_centre', 'casino', 'townhall', 'university', 'library', 'conference_centre'): return t.get('amenity')
     if t.get('man_made') in ('tower', 'lighthouse'): return 'tower'
-    if t.get('shop') == 'mall': return 'mall'
+    if t.get('shop') == 'mall' or t.get('building') == 'mall': return 'mall'
+    if t.get('amenity') in ('school', 'college', 'hospital', 'community_centre', 'police', 'fire_station'): return t.get('amenity')
+    if t.get('leisure') in ('park', 'sports_centre', 'golf_course', 'marina') and t.get('name'): return t.get('leisure')
     if t.get('building') in ('cathedral', 'train_station') or t.get('amenity') == 'place_of_worship' and t.get('building') == 'cathedral': return 'landmark'
     return None
 
@@ -120,7 +125,7 @@ class Handler(osmium.SimpleHandler):
         self.ways, self.rail, self.coast = [], [], []
         self.signals, self.trees, self.places = set(), [], []
         self.buildings, self.land, self.admin = [], [], []
-        self.transit, self.stations, self.pois, self.stops = [], [], [], []
+        self.transit, self.stations, self.pois, self.stops, self.shops = [], [], [], [], []
 
     def node(self, n):
         t = n.tags
@@ -142,6 +147,8 @@ class Handler(osmium.SimpleHandler):
             if self.inbox(x, z, 0): self.stops.append((round(x * 2) / 2, round(z * 2) / 2, 1 if t.get('shelter') == 'yes' else 0))
         k = poi_kind(t)
         if k: self.pois.append((t.get('name'), k, round(x), round(z)))
+        if t.get('name') and (t.get('shop') or t.get('amenity') in SHOP_AMENITY) and self.inbox(x, z, 0):
+            self.shops.append((t.get('name'), t.get('shop') or t.get('amenity'), round(x, 1), round(z, 1)))
 
     def pts(self, nodes):
         out = []
@@ -199,11 +206,12 @@ class Handler(osmium.SimpleHandler):
             # floating (skywalks, parkades over streets) and underground buildings would stand in the street
             if (parse_m(t.get('min_height')) or 0) > 0.5 or (parse_m(t.get('building:min_level')) or 0) > 0: return
             if t.get('location') in ('underground', 'roof') or t.get('layer', '0').startswith('-'): return
+            # every piece of a multi-part building (big malls, campuses), not just the first
+            tags = dict(t)
             for ring in a.outer_rings():
                 p = [self.proj(n.lon, n.lat) for n in ring]
-                if len(p) < 4 or not self.inbox(p[0][0], p[0][1], 50): break
-                self.buildings.append((p[:-1], dict(t)))
-                break
+                if len(p) < 4 or not self.inbox(p[0][0], p[0][1], 50): continue
+                self.buildings.append((p[:-1], tags))
             return
         if t.get('boundary') == 'administrative' and t.get('admin_level') in ('7', '8') and t.get('name'):
             rings = [[self.proj(n.lon, n.lat) for n in ring] for ring in a.outer_rings()]
@@ -233,7 +241,7 @@ def build(key, osmdir):
     def inbox(x, z, m):
         return gx0 - m <= x <= gx1 + m and gz0 - m <= z <= gz1 + m
 
-    cache = os.path.join(osmdir, f'{key}.parsed2.pickle')
+    cache = os.path.join(osmdir, f'{key}.parsed4.pickle')
     h = Handler(proj, inbox)
     if os.path.exists(cache) and os.path.getmtime(cache) > os.path.getmtime(os.path.join(osmdir, cfg['src'])):
         print(f'[{key}] using cached parse', flush=True)
@@ -243,7 +251,7 @@ def build(key, osmdir):
         print(f'[{key}] reading {cfg["src"]} ...', flush=True)
         h.apply_file(os.path.join(osmdir, cfg['src']), locations=True, idx='flex_mem')
         with open(cache, 'wb') as f:
-            pickle.dump({k_: getattr(h, k_) for k_ in ('ways', 'rail', 'coast', 'signals', 'trees', 'places', 'buildings', 'land', 'admin', 'transit', 'stations', 'pois', 'stops')}, f)
+            pickle.dump({k_: getattr(h, k_) for k_ in ('ways', 'rail', 'coast', 'signals', 'trees', 'places', 'buildings', 'land', 'admin', 'transit', 'stations', 'pois', 'stops', 'shops')}, f)
     print(f'[{key}] ways {len(h.ways)} buildings {len(h.buildings)} land {len(h.land)} coast {len(h.coast)} rail {len(h.rail)} trees {len(h.trees)} places {len(h.places)} admin {len(h.admin)}', flush=True)
 
     # ---------- road graph: split ways at shared nodes
@@ -308,7 +316,13 @@ def build(key, osmdir):
             lv = parse_m(t.get('building:levels'))
             ht = lv * 3.2 + 1.5 if lv else DEF_H[k] + (0 if area < 400 else min(10, area / 300))
         ht = max(2.5, min(600, ht))
-        if len(ring) > 60: ring = ring[:60]
+        # big, detailed outlines (malls, stadiums): simplify harder instead of cutting them off
+        tol = 0.5
+        while len(ring) > 160 and tol < 8:
+            tol *= 1.8
+            far = max(range(len(ring)), key=lambda i: (ring[i][0] - ring[0][0]) ** 2 + (ring[i][1] - ring[0][1]) ** 2)
+            ring = dp(ring[:far + 1], tol)[:-1] + dp(ring[far:] + [ring[0]], tol)[:-1]
+        if len(ring) < 3: continue
         # look: material, colour, roof, shopfront, landmark
         mat = MATERIAL.get((t.get('building:material') or t.get('building:facade:material') or '').lower(), 0)
         col = parse_colour(t.get('building:colour') or t.get('building:color'))
@@ -494,7 +508,7 @@ def build(key, osmdir):
 
     meta = dict(key=key, bbox=[gx0, gz0, gx1, gz1], center=[clat, clon], res=RES, W=W, H=H, mres=MRES, MW=MW, MH=MH, unit=1 / U,
                 names=names, munis=munis, places=sorted(set(h.places)), spawn=[sx, sz], secs=secs, version=2,
-                stations=stations, pois=pois, stops=[list(s) for s in h.stops])
+                stations=stations, pois=pois, stops=[list(s) for s in h.stops], shops=[list(s) for s in h.shops])
     gz_ = gzip.compress(bytes(blob), 9)
     b64 = base64.b64encode(gz_).decode('ascii')
     outdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'wheelie-city', 'maps')
