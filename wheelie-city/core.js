@@ -23,8 +23,9 @@ const CITIES = {
   van: {
     name: 'Vancouver', region: 'Vancouver · Burnaby · Richmond · New West · North Shore',
     blurb: 'Rain on glass towers. Real streets from Kits to Metrotown; take Hwy 1 or a bridge to the next city.', swatch: 'linear-gradient(180deg,#56646f,#8a9aa3 60%,#3f5a52)',
-    skyTop: '#4d5964', skyMid: '#808f98', fog: '#8d9ba3', fogNear: 60, fogFar: 430, sun: null, night: false, rain: true, wet: true,
-    hemi: ['#c9d6dd', '#3d4a44', 0.95], dir: ['#dfe7ec', 0.6], sunDir: [0.3, 0.8, 0.4],
+    skyTop: '#3f72ad', skyMid: '#a6c6dd', fog: '#bccdd8', fogNear: 70, fogFar: 520, sun: '#fff2d8', night: false,
+    hemi: ['#dfe8ee', '#3d4a44', 0.95], dir: ['#fff0dc', 0.95], sunDir: [0.35, 0.45, 0.6],
+    wx: { clear: 0.3, cloudy: 0.3, rain: 0.32, fog: 0.08 }, brick: 0.2,
     land: { none: '#6b706c', yard: '#62775a', grass: '#4f7a4b', forest: '#2f5236', sand: '#b8ab8a', paved: '#7a7c7c', water: '#33505e' },
     road: '#34373b', concrete: '#5a5d60', walk: '#8f9496', path: '#9a9488',
     walls: { house: ['#d8d2c4', '#a9b5b8', '#6f7f86', '#c2b39b', '#e4e0d6', '#8d6e5a', '#53626b'], mid: ['#b9c3c6', '#8a959a', '#c8bfae', '#a59a8c', '#d5d3cc'], glass: ['#7fa3a8', '#5f8a96', '#9cb8bd', '#6c8f99', '#8fb0b8', '#4f6f7a'] },
@@ -36,6 +37,7 @@ const CITIES = {
     name: 'Los Angeles', region: 'Hollywood · Downtown · Beverly Hills · Santa Monica · Venice',
     blurb: 'Golden hour. Palms, stucco and the 101, 10 and 110 freeways.', swatch: 'linear-gradient(180deg,#3b4a8c,#f08a5d 60%,#f6c08a)',
     skyTop: '#33417f', skyMid: '#e9845f', fog: '#f1b07c', fogNear: 90, fogFar: 480, sun: '#ffd7a6', sunDir: [0.25, 0.14, 1], night: false,
+    wx: { clear: 0.72, cloudy: 0.18, fog: 0.1 }, brick: 0.08,
     hemi: ['#ffd9b8', '#6a5444', 0.85], dir: ['#ffc58f', 1.05],
     land: { none: '#8c806e', yard: '#7d8658', grass: '#6f8a45', forest: '#55663a', sand: '#c8b893', paved: '#968b7a', water: '#3f7f9e' },
     road: '#3b3a3f', concrete: '#8c8780', walk: '#b9ab93', path: '#b8a886',
@@ -48,6 +50,7 @@ const CITIES = {
     name: 'Las Vegas', region: 'The Strip · Downtown · Paradise · Chinatown',
     blurb: 'Neon after midnight. Ride the Strip, jump on I-15, hit Fremont St.', swatch: 'linear-gradient(180deg,#0b0820,#3a1450 60%,#ff3d7f)',
     skyTop: '#07061a', skyMid: '#2a1240', fog: '#2b1640', fogNear: 70, fogFar: 460, sun: '#f4eedd', sunDir: [-0.4, 0.35, 1], night: true,
+    wx: { clear: 0.9, cloudy: 0.06, rain: 0.04 }, brick: 0.03,
     hemi: ['#6b5aa8', '#2a1a2e', 0.55], dir: ['#b9b4ff', 0.3],
     land: { none: '#4a3f40', yard: '#4b4a3c', grass: '#3c5a3e', forest: '#2f4532', sand: '#6a5a4a', paved: '#4f4848', water: '#1f3250' },
     road: '#26252b', concrete: '#47454c', walk: '#5b5258', path: '#5f5650',
@@ -60,6 +63,7 @@ const CITIES = {
     name: 'Miami', region: 'South Beach · Downtown · Brickell · Little Havana · Wynwood',
     blurb: 'Pastel deco and palms. Cross the MacArthur Causeway, take I-95.', swatch: 'linear-gradient(180deg,#3d9be9,#9fd8ff 60%,#ffd2e1)',
     skyTop: '#3a8fdc', skyMid: '#a8dcff', fog: '#cdeaff', fogNear: 100, fogFar: 500, sun: '#fff6d8', sunDir: [0.5, 0.55, 0.6], night: false,
+    wx: { clear: 0.55, cloudy: 0.2, rain: 0.25 },
     hemi: ['#ffffff', '#a99c84', 0.78], dir: ['#fff3dc', 0.85],
     land: { none: '#9d927b', yard: '#7f9a55', grass: '#729a48', forest: '#4c7438', sand: '#cdbf98', paved: '#9b9384', water: '#2f8fb4' },
     road: '#46464b', concrete: '#8a867e', walk: '#c9bfae', path: '#c4b89e',
@@ -72,6 +76,7 @@ const CITIES = {
     name: 'New York', region: 'Manhattan · Brooklyn · Queens · Jersey City · Hoboken',
     blurb: 'Canyons of steel at dusk. Take the FDR, cross the Williamsburg Bridge.', swatch: 'linear-gradient(180deg,#1f2840,#6f6f86 60%,#ffb36b)',
     skyTop: '#1e263d', skyMid: '#6c6b84', fog: '#7a7787', fogNear: 60, fogFar: 430, sun: '#ffcf96', sunDir: [0, 0.08, 1], night: false, dusk: true,
+    wx: { clear: 0.45, cloudy: 0.3, rain: 0.2, fog: 0.05 }, brick: 0.55,
     hemi: ['#b9b6c9', '#3a3433', 0.8], dir: ['#ffb985', 0.65],
     land: { none: '#5a5856', yard: '#5d6a4c', grass: '#5c7a48', forest: '#3f5a36', sand: '#a89c84', paved: '#64615e', water: '#2f4652' },
     road: '#303034', concrete: '#6a6866', walk: '#8a8682', path: '#8c8478',
@@ -141,6 +146,17 @@ const POVS = [
   ['bars', 'Bar cam (facing you)'], ['side', 'Side tracking'], ['drone', 'Drone'], ['tv', 'Roadside TV'],
 ];
 
+// Rider and paint customisation ('bike' / 'stock' = match the bike's own colours)
+const RIDER_OPTS = {
+  helmet: ['bike', '#f2f2f0', '#14151a', '#c8102e', '#1f5fbf', '#ffd200', '#ff6a00', '#2a9d4a', '#ff3d7f', '#8a5cf5'],
+  jersey: ['#f0e8da', '#14151a', '#c8102e', '#1f3fa8', '#ff6a00', '#2a9d4a', '#ffd200', '#ff3d7f', '#5d6770', '#37e0cf'],
+  pants: ['#262b33', '#14151a', '#3a4a6a', '#5a4a3a', '#7a7466', '#c8c8c8', '#1f3fa8', '#8a1c2a'],
+  gloves: ['bike', '#14151a', '#f2f2f0', '#c8102e', '#ffd200', '#ff6a00', '#37e0cf'],
+  skin: ['#f1c9a5', '#e0ac85', '#c99375', '#9a6440', '#6e4428'],
+  bike: ['stock', '#f2f2f0', '#14151a', '#c8102e', '#1f3fa8', '#ff6a00', '#2a9d4a', '#ffd200', '#ff3d7f', '#8a5cf5', '#5d6770'],
+};
+const RIDER_LABEL = { helmet: 'Helmet', jersey: 'Jersey', pants: 'Pants', gloves: 'Gloves', skin: 'Skin', bike: 'Bike paint' };
+const riderLook = Object.assign({ helmet: 'bike', jersey: '#f0e8da', pants: '#262b33', gloves: 'bike', skin: '#c99375', bike: 'stock' }, store.get('wc-rider', {}));
 let cityKey = store.get('wc-city', 'van'); if (!CITIES[cityKey]) cityKey = 'van';
 let bikeKey = store.get('wc-bike2', 'lbx'); if (!BIKES[bikeKey]) bikeKey = 'lbx';
 let pov = store.get('wc-pov2', 'chase'); if (!POVS.some((p) => p[0] === pov)) pov = 'chase';
@@ -152,6 +168,7 @@ let C = CITIES[cityKey];
 const canvas = $('#game'), stage = $('#stage');
 let renderer = null;
 try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true }); } catch (e) { renderer = null; }
+if (renderer) { renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.25; }
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog('#000', 50, 300);
 const camera = new THREE.PerspectiveCamera(70, 16 / 9, 0.08, 2500);
@@ -226,9 +243,11 @@ class GeoBuf {
     this.v(ax, y, az, 0, 1, 0, col, ax * s, az * s); this.v(dx, y, dz, 0, 1, 0, col, dx * s, dz * s); this.v(cx, y, cz, 0, 1, 0, col, cx * s, cz * s);
   }
   // vertical wall from (x0,z0) to (x1,z1), y0..y1, outward normal (nx,nz); uv u along the wall, v up
-  wall(x0, z0, x1, z1, y0, y1, nx, nz, col, u0, u1, v0, v1) {
-    this.v(x0, y0, z0, nx, 0, nz, col, u0, v0); this.v(x1, y0, z1, nx, 0, nz, col, u1, v0); this.v(x1, y1, z1, nx, 0, nz, col, u1, v1);
-    this.v(x0, y0, z0, nx, 0, nz, col, u0, v0); this.v(x1, y1, z1, nx, 0, nz, col, u1, v1); this.v(x0, y1, z0, nx, 0, nz, col, u0, v1);
+  // (optional colB: a different colour along the bottom edge, for grime / ambient occlusion at street level)
+  wall(x0, z0, x1, z1, y0, y1, nx, nz, col, u0, u1, v0, v1, colB) {
+    const cb = colB || col;
+    this.v(x0, y0, z0, nx, 0, nz, cb, u0, v0); this.v(x1, y0, z1, nx, 0, nz, cb, u1, v0); this.v(x1, y1, z1, nx, 0, nz, col, u1, v1);
+    this.v(x0, y0, z0, nx, 0, nz, cb, u0, v0); this.v(x1, y1, z1, nx, 0, nz, col, u1, v1); this.v(x0, y1, z0, nx, 0, nz, col, u0, v1);
   }
   get empty() { return this.p.length === 0; }
   build() {
@@ -246,8 +265,39 @@ class GeoBuf {
 const sky = (() => {
   const g = new THREE.SphereGeometry(1800, 32, 16);
   g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 3), 3));
-  const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false }));
+  const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false, toneMapped: false }));
   m.renderOrder = -10; scene.add(m); return m;
+})();
+// Reflections: a blurred environment map rendered from the current sky, used by every physically based material
+const envScene = new THREE.Scene();
+envScene.add(new THREE.Mesh(sky.geometry, sky.material));
+const pmrem = renderer ? new THREE.PMREMGenerator(renderer) : null;
+let envRT = null;
+function updateEnv() {
+  if (!pmrem || quality === 'low') { scene.environment = null; return; }
+  const rt = pmrem.fromScene(envScene, 0.04, 1, 4000);
+  if (envRT) envRT.dispose();
+  envRT = rt; scene.environment = rt.texture;
+}
+// Clouds: soft billboards on the sky dome, thicker and greyer as the weather turns
+const clouds = (() => {
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 128;
+  const g = cv.getContext('2d'), r = mulberry(77);
+  for (let i = 0; i < 26; i++) {
+    const x = 40 + r() * 176, y = 50 + r() * 40, rad = 18 + r() * 34;
+    const grd = g.createRadialGradient(x, y, 0, x, y, rad); grd.addColorStop(0, 'rgba(255,255,255,.55)'); grd.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grd; g.fillRect(0, 0, 256, 128);
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  const grp = new THREE.Group(), mats = [];
+  for (let i = 0; i < 16; i++) {
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: false, opacity: 0.6 });
+    const s = new THREE.Sprite(mat), a = (i / 16) * TAU + r() * 0.3, d = 1300 + r() * 250;
+    s.position.set(Math.sin(a) * d, 260 + r() * 260, Math.cos(a) * d); s.scale.set(700 + r() * 500, 220 + r() * 120, 1); s.renderOrder = -9;
+    grp.add(s); mats.push(mat);
+  }
+  scene.add(grp);
+  return { grp, mats };
 })();
 const sun = new THREE.Mesh(new THREE.CircleGeometry(60, 32), new THREE.MeshBasicMaterial({ color: '#fff', fog: false, depthWrite: false }));
 sun.renderOrder = -9; scene.add(sun);
@@ -262,23 +312,75 @@ ground.position.y = -0.25; scene.add(ground);
 const backdrop = new THREE.Group(); scene.add(backdrop);
 let rain = null;
 
-function setupSky() {
-  const fog = new THREE.Color(C.fog), topC = new THREE.Color(C.skyTop), mid = new THREE.Color(C.skyMid);
-  const pos = sky.geometry.attributes.position, col = sky.geometry.attributes.color;
+// ---------------------------------------------------------------- weather: clear, cloudy, rain, fog, blending over ~25 s
+const WX = { mode: store.get('wc-weather', 'auto'), from: 'clear', to: 'clear', t: 1, timer: 200, cloud: 0, rain: 0, fog: 0, wet: 0, skyT: 0 };
+const WX_LOOK = { clear: { cloud: 0, rain: 0, fog: 0 }, cloudy: { cloud: 0.8, rain: 0, fog: 0.1 }, rain: { cloud: 0.95, rain: 1, fog: 0.25 }, fog: { cloud: 0.5, rain: 0, fog: 1 } };
+const WX_NAME = { clear: 'Skies clearing', cloudy: 'Clouding over', rain: 'Rain moving in', fog: 'Fog rolling in' };
+function pickWeather() {
+  const w = C.wx || { clear: 1 }, tot = Object.values(w).reduce((a, b) => a + b, 0);
+  let r = Math.random() * tot;
+  for (const [k, v] of Object.entries(w)) { r -= v; if (r <= 0) return k; }
+  return 'clear';
+}
+function setupWeather() {
+  const k = WX.mode === 'auto' ? pickWeather() : WX.mode;
+  Object.assign(WX, { from: k, to: k, t: 1, timer: 150 + Math.random() * 150, wet: k === 'rain' ? 1 : 0 });
+  applyWeather(0, true);
+}
+function updateWeather(dt, announce) {
+  if (WX.mode === 'auto') {
+    WX.timer -= dt;
+    if (WX.timer <= 0 && WX.t >= 1) {
+      const n = pickWeather();
+      if (n !== WX.to) { WX.from = WX.to; WX.to = n; WX.t = 0; if (announce) announce(WX_NAME[n]); }
+      WX.timer = 150 + Math.random() * 180;
+    }
+  } else if (WX.to !== WX.mode && WX.t >= 1) { WX.from = WX.to; WX.to = WX.mode; WX.t = 0; }
+  if (WX.t < 1) WX.t = Math.min(1, WX.t + dt / 25);
+  applyWeather(dt, false);
+}
+const wxC = { top: new THREE.Color(), mid: new THREE.Color(), fog: new THREE.Color(), tmp: new THREE.Color() };
+function applyWeather(dt, force) {
+  const a = WX_LOOK[WX.from], b = WX_LOOK[WX.to], k = smooth(0, 1, WX.t);
+  WX.cloud = lerp(a.cloud, b.cloud, k); WX.rain = lerp(a.rain, b.rain, k); WX.fog = lerp(a.fog, b.fog, k);
+  WX.wet = force ? WX.rain : WX.rain > 0.3 ? Math.min(1, WX.wet + dt / 20) : Math.max(0, WX.wet - dt / 90);
+  WX.skyT -= dt; WX.envT = (WX.envT || 0) - dt;
+  if (!force && WX.skyT > 0) return;
+  WX.skyT = 0.2;
+  const refreshEnv = force || (WX.t < 1 && WX.envT <= 0);
+  if (refreshEnv) WX.envT = 3;
+  const dark = C.night ? 0.3 : C.dusk ? 0.6 : 1;
+  const grey = (hex) => wxC.tmp.set(hex).multiplyScalar(dark);
+  wxC.top.set(C.skyTop).lerp(grey('#6c747c'), WX.cloud * 0.85).lerp(grey('#4b545c'), WX.rain * 0.7).lerp(grey('#b9bec2'), WX.fog * 0.75);
+  wxC.mid.set(C.skyMid).lerp(grey('#9aa2a8'), WX.cloud * 0.8).lerp(grey('#78838a'), WX.rain * 0.7).lerp(grey('#c3c8cb'), WX.fog * 0.8);
+  wxC.fog.set(C.fog).lerp(grey('#a8afb4'), WX.cloud * 0.6).lerp(grey('#87939a'), WX.rain * 0.7).lerp(grey('#c6cacd'), WX.fog * 0.85);
+  const pos = sky.geometry.attributes.position, col = sky.geometry.attributes.color, c = wxC.tmp;
   for (let i = 0; i < pos.count; i++) {
     const y = pos.getY(i) / 1800;
-    const c = y > 0.2 ? mid.clone().lerp(topC, Math.min(1, (y - 0.2) / 0.6)) : y > 0 ? fog.clone().lerp(mid, y / 0.2) : fog.clone();
+    if (y > 0.2) c.copy(wxC.mid).lerp(wxC.top, Math.min(1, (y - 0.2) / 0.6)); else if (y > 0) c.copy(wxC.fog).lerp(wxC.mid, y / 0.2); else c.copy(wxC.fog);
     col.setXYZ(i, c.r, c.g, c.b);
   }
   col.needsUpdate = true;
-  scene.fog.color.copy(fog); scene.fog.near = C.fogNear; scene.fog.far = C.fogFar * (quality === 'low' ? 0.75 : quality === 'high' ? 1.25 : 1);
-  if (renderer) renderer.setClearColor(fog);
-  sun.visible = !!C.sun; if (C.sun) sun.material.color.set(C.sun);
-  hemi.color.set(C.hemi[0]); hemi.groundColor.set(C.hemi[1]); hemi.intensity = C.hemi[2];
-  dirL.color.set(C.dir[0]); dirL.intensity = C.dir[1];
-  headlight.intensity = C.night || C.dusk ? 2.2 : C.rain ? 0.8 : 0;
+  if (refreshEnv) updateEnv();
+  scene.fog.color.copy(wxC.fog);
+  scene.fog.near = C.fogNear * (1 - 0.7 * WX.fog);
+  scene.fog.far = C.fogFar * (quality === 'low' ? 0.75 : quality === 'high' ? 1.25 : 1) * (1 - 0.15 * WX.cloud - 0.3 * WX.rain - 0.6 * WX.fog);
+  if (renderer) renderer.setClearColor(wxC.fog);
+  sun.visible = !!C.sun && WX.cloud < 0.6 && WX.fog < 0.6;
+  if (C.sun) { sun.material.color.set(C.sun); sun.material.transparent = true; sun.material.opacity = clamp(1 - WX.cloud * 1.6 - WX.fog * 1.6, 0, 1); }
+  hemi.intensity = C.hemi[2] * (1 - 0.12 * WX.cloud);
+  dirL.intensity = C.dir[1] * (1 - 0.6 * WX.cloud) * (1 - 0.25 * WX.fog);
+  headlight.intensity = C.night || C.dusk ? 2.2 : 1.1 * Math.max(WX.rain, WX.fog, WX.cloud * 0.4);
+  if (rain) { rain.visible = WX.rain > 0.03; rain.material.opacity = 0.42 * WX.rain; }
+  const cc = wxC.tmp.set('#ffffff').lerp(grey('#7d868c'), WX.rain * 0.8 + WX.cloud * 0.3).multiplyScalar(C.night ? 0.25 : C.dusk ? 0.75 : 1);
+  clouds.mats.forEach((mt, i) => { mt.color.copy(cc); mt.opacity = clamp((i % 3 === 0 ? 0.35 : 0.55) + WX.cloud * 0.5, 0, 1) * (1 - WX.fog * 0.9); });
+  if (typeof MM !== 'undefined' && MM.road) { MM.road.roughness = lerp(0.93, 0.32, WX.wet); MM.road.metalness = 0.14 * WX.wet; }
+}
+function setupSky() {
+  hemi.color.set(C.hemi[0]); hemi.groundColor.set(C.hemi[1]);
+  dirL.color.set(C.dir[0]);
   ground.material.color.set(C.land.none);
-  buildBackdrop(); setupRain();
+  buildBackdrop(); setupRain(); setupWeather();
 }
 function buildBackdrop() {
   while (backdrop.children.length) { const m = backdrop.children.pop(); m.geometry.dispose(); m.material.dispose(); }
@@ -305,7 +407,6 @@ function buildBackdrop() {
 }
 function setupRain() {
   if (rain) { scene.remove(rain); rain.geometry.dispose(); rain.material.dispose(); rain = null; }
-  if (!C.rain) return;
   const N = 1100, pos = new Float32Array(N * 6), r = mulberry(5);
   for (let i = 0; i < N; i++) {
     const x = (r() - 0.5) * 60, y = r() * 30, z = (r() - 0.5) * 60;
@@ -337,14 +438,89 @@ function noiseTexture(base, amount, size = 256, seed = 1, speckle = 0) {
   const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
   return t;
 }
+// Sidewalk slabs: square pavers with dark joints and a little staining
+function paverTexture() {
+  const cv = document.createElement('canvas'); cv.width = cv.height = 256;
+  const g = cv.getContext('2d'), r = mulberry(31);
+  g.fillStyle = '#c9c6c0'; g.fillRect(0, 0, 256, 256);
+  for (let y = 0; y < 256; y += 64) for (let x = 0; x < 256; x += 64) {
+    const k = 0.93 + r() * 0.12; g.fillStyle = `rgb(${Math.round(201 * k)},${Math.round(198 * k)},${Math.round(192 * k)})`; g.fillRect(x + 1, y + 1, 62, 62);
+  }
+  const img = g.getImageData(0, 0, 256, 256);
+  for (let i = 0; i < img.data.length; i += 4) { const n = (r() - 0.5) * 22; img.data[i] += n; img.data[i + 1] += n; img.data[i + 2] += n; }
+  g.putImageData(img, 0, 0);
+  g.fillStyle = 'rgba(70,70,70,.55)'; for (let k = 0; k <= 256; k += 64) { g.fillRect(k - 1, 0, 2, 256); g.fillRect(0, k - 1, 256, 2); }
+  g.globalAlpha = 0.08; g.fillStyle = '#000'; for (let i = 0; i < 9; i++) { g.beginPath(); g.arc(r() * 256, r() * 256, 6 + r() * 18, 0, TAU); g.fill(); }
+  g.globalAlpha = 1;
+  const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
+  return t;
+}
+// Fine ground detail: multiplies the blurry landcover colours so grass and dirt look like grass and dirt up close
+const detailTex = (() => {
+  const S = 256, cv = document.createElement('canvas'); cv.width = cv.height = S;
+  const g = cv.getContext('2d'), img = g.createImageData(S, S), r = mulberry(55);
+  // two octaves of value noise: R = fine grain, G = big patches
+  const grid = (n) => { const a = []; for (let i = 0; i < n * n; i++) a.push(r()); return (x, y) => { const fx = x * n / S, fy = y * n / S, x0 = Math.floor(fx), y0 = Math.floor(fy), tx = fx - x0, ty = fy - y0, at = (i, j) => a[((j % n + n) % n) * n + ((i % n + n) % n)]; const s = (t) => t * t * (3 - 2 * t); return lerp(lerp(at(x0, y0), at(x0 + 1, y0), s(tx)), lerp(at(x0, y0 + 1), at(x0 + 1, y0 + 1), s(tx)), s(ty)); }; };
+  const n1 = grid(64), n2 = grid(16), n3 = grid(6);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const o = (y * S + x) * 4, fine = n1(x, y) * 0.6 + r() * 0.4;
+    img.data[o] = fine * 255; img.data[o + 1] = (n2(x, y) * 0.5 + n3(x, y) * 0.5) * 255; img.data[o + 2] = 128; img.data[o + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+})();
+function addGroundDetail(mat) {
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.detailMap = { value: detailTex };
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec2 vDetUV;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvDetUV = (modelMatrix * vec4(transformed, 1.0)).xz;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D detailMap;\nvarying vec2 vDetUV;')
+      .replace('#include <map_fragment>', '#include <map_fragment>\nfloat dFine = texture2D(detailMap, vDetUV * 0.45).r, dBig = texture2D(detailMap, vDetUV * 0.012).g;\ndiffuseColor.rgb *= (0.72 + 0.56 * dFine) * (0.85 + 0.3 * dBig);');
+  };
+  mat.customProgramCacheKey = () => 'ground-detail';
+  return mat;
+}
 // Facade textures: an 8 x 8 grid of window bays, white walls (tinted by vertex colour), and a lit-window mask for night
 function facadeTextures(style, city, seed) {
+  if (style === 'shop') return shopTextures(city, seed);
   const r = mulberry(seed), N = 8, S = 32;
   const wall = document.createElement('canvas'); wall.width = wall.height = N * S;
   const lit = document.createElement('canvas'); lit.width = lit.height = N * S;
   const gw = wall.getContext('2d'), gl = lit.getContext('2d');
   gw.fillStyle = '#ffffff'; gw.fillRect(0, 0, N * S, N * S);
   gl.fillStyle = '#000000'; gl.fillRect(0, 0, N * S, N * S);
+  if (style === 'brick') {
+    // brick courses, then tall sash windows with lintels
+    for (let y = 0; y < N * S; y += 4) { gw.fillStyle = `rgba(0,0,0,${0.05 + r() * 0.05})`; gw.fillRect(0, y, N * S, 1); for (let x = (y / 4) % 2 ? 0 : 4; x < N * S; x += 8) gw.fillRect(x, y, 1, 4); }
+    for (let i = 0; i < 900; i++) { gw.fillStyle = `rgba(${r() < 0.5 ? '0,0,0' : '255,255,255'},${r() * 0.08})`; gw.fillRect(r() * N * S, r() * N * S, 7, 3); }
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const wx = x * S + 9, wy = y * S + 6;
+      gw.fillStyle = '#e8e2d6'; gw.fillRect(wx - 2, wy - 3, 18, 3); gw.fillRect(wx - 2, wy + 20, 18, 2);
+      gw.fillStyle = '#2a2f38'; gw.fillRect(wx, wy, 14, 20);
+      gw.fillStyle = '#e8e2d6'; gw.fillRect(wx, wy + 9, 14, 1); gw.fillRect(wx + 7, wy, 1, 20);
+      if (r() < (city.night ? 0.45 : city.dusk ? 0.3 : 0)) { gl.fillStyle = '#e8c890'; gl.fillRect(wx, wy, 14, 20); }
+    }
+  } else if (style === 'industrial') {
+    // corrugated cladding, a band of high windows, a roll-up door every few bays
+    for (let x = 0; x < N * S; x += 4) { gw.fillStyle = 'rgba(0,0,0,.14)'; gw.fillRect(x, 0, 1, N * S); gw.fillStyle = 'rgba(255,255,255,.12)'; gw.fillRect(x + 2, 0, 1, N * S); }
+    for (let y = 0; y < N; y += 2) for (let x = 0; x < N; x++) { gw.fillStyle = '#39424c'; gw.fillRect(x * S + 2, y * S + 4, S - 4, 7); }
+    for (let x = 0; x < N; x += 3) { gw.fillStyle = 'rgba(0,0,0,.28)'; gw.fillRect(x * S + 4, N * S - 30, S + 10, 30); gw.fillStyle = 'rgba(0,0,0,.18)'; for (let k = 0; k < 30; k += 3) gw.fillRect(x * S + 4, N * S - 30 + k, S + 10, 1); }
+  } else if (style === 'stone') {
+    // ashlar blocks and tall arched windows
+    for (let y = 0; y < N * S; y += 8) { gw.fillStyle = 'rgba(0,0,0,.07)'; gw.fillRect(0, y, N * S, 1); for (let x = (y / 8) % 2 ? 0 : 12; x < N * S; x += 24) gw.fillRect(x, y, 1, 8); }
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const wx = x * S + 10, wy = y * S + 5;
+      gw.fillStyle = '#2b3038'; gw.fillRect(wx, wy + 5, 12, 21); gw.beginPath(); gw.arc(wx + 6, wy + 5, 6, Math.PI, 0); gw.fill();
+      gw.fillStyle = 'rgba(0,0,0,.15)'; gw.fillRect(wx - 3, wy + 26, 18, 2);
+      if (r() < (city.night ? 0.4 : city.dusk ? 0.25 : 0)) { gl.fillStyle = '#f0d090'; gl.fillRect(wx, wy + 2, 12, 24); }
+    }
+  }
+  if (style === 'brick' || style === 'industrial' || style === 'stone') {
+    const tw = new THREE.CanvasTexture(wall), tl = new THREE.CanvasTexture(lit);
+    for (const t of [tw, tl]) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; }
+    return [tw, tl];
+  }
   const win = style === 'glass' ? [1, 2, 30, 28] : style === 'mid' ? [6, 7, 20, 18] : [9, 9, 14, 15];
   const glassC = style === 'glass' ? '#33505c' : '#2b3340';
   const litShare = city.night ? 0.5 : city.dusk ? 0.35 : 0.0;
@@ -360,6 +536,50 @@ function facadeTextures(style, city, seed) {
   const tw = new THREE.CanvasTexture(wall), tl = new THREE.CanvasTexture(lit);
   for (const t of [tw, tl]) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; }
   return [tw, tl];
+}
+// Ground-floor shopfronts: one bay = big glass panes, a door, a sign band and an awning edge. Tinted per building.
+function shopTextures(city, seed) {
+  const r = mulberry(seed), W = 512, H = 128, bays = 4, bw = W / bays;
+  const wall = document.createElement('canvas'); wall.width = W; wall.height = H;
+  const lit = document.createElement('canvas'); lit.width = W; lit.height = H;
+  const g = wall.getContext('2d'), gl = lit.getContext('2d');
+  g.fillStyle = '#ffffff'; g.fillRect(0, 0, W, H);
+  gl.fillStyle = '#000'; gl.fillRect(0, 0, W, H);
+  for (let b = 0; b < bays; b++) {
+    const x = b * bw;
+    // sign band and awning stripe (top of the texture is the top of the ground floor)
+    g.fillStyle = '#ffffff'; g.fillRect(x, 0, bw, 26);
+    g.fillStyle = 'rgba(0,0,0,.25)'; g.fillRect(x, 26, bw, 3);
+    for (let k = 0; k < bw; k += 12) { g.fillStyle = 'rgba(255,255,255,.35)'; g.fillRect(x + k, 0, 6, 10); }
+    // glass
+    g.fillStyle = '#20262e'; g.fillRect(x + 6, 32, bw - 12, H - 40);
+    g.fillStyle = 'rgba(160,190,210,.18)'; g.beginPath(); g.moveTo(x + 6, 32); g.lineTo(x + 40, 32); g.lineTo(x + 6, 80); g.fill();
+    // mullions, door
+    g.fillStyle = '#d9d9d9'; g.fillRect(x + bw / 2 - 2, 32, 3, H - 40);
+    const dx = x + (r() < 0.5 ? 14 : bw - 44);
+    g.fillStyle = '#3a2e26'; g.fillRect(dx, 40, 30, H - 48);
+    g.fillStyle = '#c8c8c8'; g.fillRect(x, H - 8, bw, 8);
+    // shop goods suggested by a few coloured blocks behind the glass
+    for (let k = 0; k < 5; k++) { g.fillStyle = `hsl(${Math.floor(r() * 360)},45%,45%)`; g.fillRect(x + 12 + r() * (bw - 40), 70 + r() * 30, 8 + r() * 14, 10 + r() * 16); }
+    gl.fillStyle = city.night || city.dusk ? '#ffe2a8' : '#000'; gl.fillRect(x + 6, 32, bw - 12, H - 40);
+    gl.fillStyle = city.night || city.dusk ? '#ffffff' : '#000'; gl.fillRect(x, 0, bw, 26);
+  }
+  const tw = new THREE.CanvasTexture(wall), tl = new THREE.CanvasTexture(lit);
+  for (const t of [tw, tl]) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; }
+  return [tw, tl];
+}
+// Floating name tag for landmarks and stations
+function labelTexture(text, sub, color) {
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 128;
+  const g = cv.getContext('2d');
+  g.font = '900 54px "Archivo", "Arial Black", sans-serif';
+  const w = Math.min(500, Math.max(g.measureText(text).width, 120) + 40);
+  g.fillStyle = 'rgba(12,13,19,.78)'; g.beginPath(); g.roundRect ? g.roundRect((512 - w) / 2, 8, w, sub ? 108 : 76, 14) : g.rect((512 - w) / 2, 8, w, sub ? 108 : 76); g.fill();
+  g.fillStyle = color || '#ff3d7f'; g.fillRect((512 - w) / 2, 8, 8, sub ? 108 : 76);
+  g.fillStyle = '#f3efe7'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, 256, 46, 460);
+  if (sub) { g.font = '700 26px "Archivo", sans-serif'; g.fillStyle = '#c9c4ba'; g.fillText(sub.toUpperCase(), 256, 92, 460); }
+  const t = new THREE.CanvasTexture(cv); t.anisotropy = 4;
+  return t;
 }
 function signTexture(text, color) {
   const cv = document.createElement('canvas'); cv.width = 512; cv.height = 160;

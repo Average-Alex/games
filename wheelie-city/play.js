@@ -26,6 +26,25 @@ function buildCards() {
     bc.appendChild(b);
   }
 }
+function buildRiderOpts() {
+  const box = $('#riderOpts'); box.innerHTML = '';
+  for (const [k, opts] of Object.entries(RIDER_OPTS)) {
+    const row = document.createElement('div'); row.className = 'opt-row';
+    row.innerHTML = `<span>${RIDER_LABEL[k]}</span>`;
+    const sws = document.createElement('div'); sws.className = 'sws'; sws.setAttribute('role', 'group'); sws.setAttribute('aria-label', RIDER_LABEL[k]);
+    for (const c of opts) {
+      const b = document.createElement('button'); b.type = 'button';
+      const stock = c === 'bike' || c === 'stock';
+      if (stock) { b.className = 'stock'; b.title = 'Match the bike'; b.setAttribute('aria-label', `${RIDER_LABEL[k]}: match the bike`); }
+      else { b.style.background = c; b.setAttribute('aria-label', `${RIDER_LABEL[k]} ${c}`); }
+      b.setAttribute('aria-pressed', String(riderLook[k] === c));
+      b.addEventListener('click', () => { riderLook[k] = c; store.set('wc-rider', riderLook); buildRiderOpts(); buildBike(); if (MAP) placeRig(0); });
+      sws.appendChild(b);
+    }
+    row.appendChild(sws); box.appendChild(row);
+  }
+}
+buildRiderOpts();
 $('#tabE').addEventListener('click', () => { bikeTab = 'e'; buildCards(); });
 $('#tabG').addEventListener('click', () => { bikeTab = 'gas'; buildCards(); });
 const povSel = $('#povSel');
@@ -39,7 +58,15 @@ povSel.addEventListener('change', () => setPov(povSel.value));
 $('#sens').value = sens;
 $('#sens').addEventListener('input', (e) => { sens = parseFloat(e.target.value); store.set('wc-sens', sens); });
 const qualSel = $('#quality'); qualSel.value = quality;
-qualSel.addEventListener('change', () => { quality = qualSel.value; store.set('wc-quality', quality); applyQuality(); setupSky(); if (MAP) { clearTiles(); updateTiles(S.x, S.z, true); } });
+qualSel.addEventListener('change', () => { quality = qualSel.value; store.set('wc-quality', quality); applyQuality(); setupSky(); if (MAP) { clearTiles(); setupMapMaterials(); applyWeather(0, true); updateTiles(S.x, S.z, true); } });
+const wxSel = $('#weatherSel'); wxSel.value = WX.mode;
+wxSel.addEventListener('change', () => { WX.mode = wxSel.value; store.set('wc-weather', WX.mode); if (WX.mode !== 'auto') { WX.from = WX.to = WX.mode; WX.t = 1; WX.wet = WX.mode === 'rain' ? 1 : 0; applyWeather(0, true); } });
+const respSel = $('#respawnMode'); respSel.value = store.get('wc-respawn', 'crash');
+respSel.addEventListener('change', () => store.set('wc-respawn', respSel.value));
+for (const [id, mode] of [['#clickDest', 'dest'], ['#clickSpawn', 'spawn']]) $(id).addEventListener('click', () => {
+  NAV.clickMode = mode; $('#clickDest').setAttribute('aria-pressed', String(mode === 'dest')); $('#clickSpawn').setAttribute('aria-pressed', String(mode === 'spawn'));
+  $('#bmHint').textContent = mode === 'spawn' ? 'Click where you want to start and respawn' : 'Click to set a destination · scroll to zoom · drag to pan';
+});
 const sizeSel = $('#size');
 sizeSel.value = String(store.get('wc-size', 1280)); if (!sizeSel.value) sizeSel.value = '1280';
 function applySize() { stage.style.setProperty('--stage-w', `${sizeSel.value}px`); resize(); }
@@ -52,6 +79,7 @@ async function loadCity(key) {
   loadingKey = key; mapReady = false; $('#go').disabled = true;
   mapStatus(`Loading the ${CITIES[key].name} map…`);
   clearTiles();
+  clearRoute(); NAV.entries = null; NAV.view = null;
   for (const u of units) deactivate(u);
   if (MAP && MAP.key !== key) MAP = null;
   try {
@@ -69,9 +97,18 @@ async function loadCity(key) {
 function setupCity() {
   setupSky();
   setupMapMaterials();
+  applyWeather(0, true);
   buildUnitPools();
+  buildPeds();
+  buildTrains();
+  RIDE.on = false; RIDE.train = null;
   cityMapCv = null;
   resetWorld();
+}
+// Your chosen spawn point for this city (set from the city map), or the city's default
+function spawnPoint() {
+  const sp = store.get(`wc-spawn-${cityKey}`, null);
+  return sp && Number.isFinite(sp[0]) ? sp : MAP.meta.spawn;
 }
 
 // ---------------------------------------------------------------- state
@@ -100,24 +137,45 @@ function resetRider(x, z, psi, v) {
     tricks: freshTricks(), vis: freshVis(), wob: 0, thrLock: 0, offenseT: 0, slideT: 0, alat: 0, roll: 0,
     gear: 1, rpm: BIKES[bikeKey].engine ? BIKES[bikeKey].engine.idle : 0, shiftT: 0, limiter: false, clutchDump: 0,
     skid: 0, scrape: 0, bodySlide: 0, hitStop: 0, shake: 0, roadE: -1, onRoad: true, surface: 'road', bridgeE: -1,
-    muniT: 0, tv: null, skidDist: 0, susp: 0,
+    muniT: 0, tv: null, skidDist: 0, susp: 0, spawnGrace: 1.5, redCd: 0, lastJunction: -1, riding: false,
   });
   W = { active: false };
+  if (rig) rig.root.visible = true;
+  if (typeof RIDE !== 'undefined' && RIDE.train) { RIDE.train.mine = false; RIDE.on = false; RIDE.train = null; }
 }
+// Put the rider on the nearest road, in a lane, at a spot that is clear of trees, poles and walls for 12 m ahead
 function placeOnRoad(x, z, heading, v, allowHwy) {
-  const q = roadQuery(x, z, 400, (e) => drivable(e) && (allowHwy || !RC[MAP.eCls[e]].hwy));
+  let q = roadQuery(x, z, 400, (e) => drivable(e) && (allowHwy || !RC[MAP.eCls[e]].hwy));
+  if (q.e < 0) q = roadQuery(x, z, 4000, drivable);             // far out (at sea, in a forest): find any road
+  if (q.e < 0) { const sp = MAP.meta.spawn; q = roadQuery(sp[0], sp[1], 4000, drivable); }
   if (q.e < 0) { resetRider(x, z, heading, v); return; }
-  edgePoint(q.e, q.s, EP);
+  const e = q.e, s0 = q.s, L = MAP.eLen[e];
+  edgePoint(e, s0, EP);
   let dir = EP.tx * Math.sin(heading) + EP.tz * Math.cos(heading) >= 0 ? 1 : -1;
-  if (MAP.eFlag[q.e] & F_ONEWAY) dir = 1;
-  const fx = EP.tx * dir, fz = EP.tz * dir, off = laneOffset(q.e, lanesPerDir(q.e) - 1);
-  resetRider(EP.x - fz * off, EP.z + fx * off, Math.atan2(fx, fz), v);
+  if (MAP.eFlag[e] & F_ONEWAY) dir = 1;
+  updateTiles(EP.x, EP.z, true);         // make sure the trees and poles here exist before checking
+  const lanes = lanesPerDir(e), laneTry = [lanes - 1, 0, Math.floor(lanes / 2)];
+  let best = null;
+  outer: for (const ds of [0, 10, -10, 20, -20, 30, -30, 45, -45, 60, -60]) {
+    const s = clamp(s0 + ds, 2, L - 2);
+    edgePoint(e, s, EP);
+    const fx = EP.tx * dir, fz = EP.tz * dir;
+    for (const ln of laneTry) {
+      const off = laneOffset(e, ln), px = EP.x - fz * off, pz = EP.z + fx * off;
+      let clear = true;
+      for (let k = -2; k <= 12 && clear; k += 1) if (hitAt(px + fx * k, pz + fz * k, 0.9) || landAt(px + fx * k, pz + fz * k) === 1 && !roadQuery(px + fx * k, pz + fz * k, 6).in) clear = false;
+      for (const u of units) if (u.on && Math.hypot(u.x - px, u.z - pz) < 12) clear = false;
+      if (clear) { best = [px, pz, Math.atan2(fx, fz)]; break outer; }
+      if (!best) best = [px, pz, Math.atan2(fx, fz)];
+    }
+  }
+  resetRider(best[0], best[1], best[2], v);
 }
 function resetWorld() {
   clearTiles();
   for (const u of units) deactivate(u);
   if (heli) { heli.on = false; heli.g.visible = false; heli.beam.visible = false; heli.spot.intensity = 0; }
-  const sp = MAP.meta.spawn;
+  const sp = spawnPoint();
   placeOnRoad(sp[0], sp[1], 0, 0, false);
   heat = 0; unseenT = 0; chaseMax = 0;
   clearFX();
@@ -128,7 +186,12 @@ function resetWorld() {
 }
 function startRide() {
   buildBike(); sfx.setBike();
-  const sp = MAP.meta.spawn;
+  // a fresh ride starts clean: no wanted level, no cops already on your tail, no helicopter
+  heat = 0; unseenT = 0; chaseMax = 0;
+  for (const u of units) deactivate(u);
+  if (heli) { heli.on = false; heli.g.visible = false; heli.beam.visible = false; heli.spot.intensity = 0; }
+  clearFX();
+  const sp = spawnPoint();
   placeOnRoad(sp[0], sp[1], S.psi, 4, false);
   bails = 3; banked = 0; longest = 0; topSpeed = 0; nearMisses = 0; maxStarsRun = 0;
   renderBails();
@@ -147,11 +210,16 @@ function renderBails() {
 
 // ---------------------------------------------------------------- input
 const keys = new Set();
-const GAME_KEYS = ['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'ShiftLeft', 'ShiftRight', 'KeyR', 'KeyM', 'KeyV', 'KeyN', 'KeyP', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'];
+const GAME_KEYS = ['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'ShiftLeft', 'ShiftRight', 'KeyR', 'KeyM', 'KeyV', 'KeyN', 'KeyP', 'KeyE', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'];
 let noLock = false;
 addEventListener('keydown', (e) => {
+  if (e.target && e.target.tagName === 'INPUT') return;          // typing in the map search box
   if (state === 'play' && GAME_KEYS.includes(e.code)) e.preventDefault();
   if (e.repeat) return;
+  if (mapOpen && state === 'play') {
+    if (e.code === 'KeyN' || e.code === 'Escape') toggleMap();
+    return;
+  }
   keys.add(e.code);
   if (e.code === 'KeyV' && state === 'play') { const i = POVS.findIndex((p) => p[0] === pov); setPov(POVS[(i + 1) % POVS.length][0]); popup(POVS[(i + 1) % POVS.length][1]); }
   if (state === 'play') {
@@ -163,6 +231,10 @@ addEventListener('keydown', (e) => {
     }
     if (e.code === 'KeyR' && !S.crashed) { respawn(); popup('Reset'); }
     if (e.code === 'KeyM') toggleMute();
+    if (e.code === 'KeyE') {
+      if (S.riding && RIDE.train) { if (RIDE.train.atSt && RIDE.train.dwell > 0) leaveTrain(); else popup('Wait for the next stop'); }
+      else if (RIDE.near && !S.crashed) boardTrain(RIDE.near);
+    }
     if (e.code === 'KeyN') toggleMap();
     if (e.code === 'KeyP' || (e.code === 'Escape' && noLock)) pause();
   } else if (state === 'over' && e.code === 'Enter') begin(true);
@@ -183,11 +255,21 @@ function lockFailed() {
   const n = $('#lockNote'); n.hidden = false; n.textContent = 'Mouse capture is blocked here, so steer with A and D and lean with Shift and Q. Pause with P.';
 }
 document.addEventListener('pointerlockerror', lockFailed);
-document.addEventListener('pointerlockchange', () => { if (document.pointerLockElement !== canvas && state === 'play' && !noLock) pause(); });
+document.addEventListener('pointerlockchange', () => { if (document.pointerLockElement !== canvas && state === 'play' && !noLock && !mapOpen) pause(); });
 canvas.addEventListener('click', () => { if (state === 'play' && !document.pointerLockElement) lockPointer(); });
+// The city map frees the mouse so you can click a destination; the ride is paused while it's open
 function toggleMap() {
   mapOpen = !mapOpen; $('#bigmap').hidden = !mapOpen;
-  if (mapOpen && !cityMapCv) renderCityMap();
+  keys.clear();
+  if (mapOpen) {
+    openCityMap();
+    if (document.pointerLockElement) document.exitPointerLock();
+    $('#bmHint').textContent = route ? `${route.dest.name}: ${fmtDist(route.total - NAV.prog)} · click to change, right-click to clear` : 'Click to set a destination · scroll to zoom · drag to pan · N or Esc to ride';
+  } else {
+    $('#navSearch').blur();
+    lockPointer();
+    last = performance.now();
+  }
 }
 
 // ---------------------------------------------------------------- the rider
@@ -248,7 +330,7 @@ function step(d) {
   S.surface = q.in ? (RC[MAP.eCls[q.e]].path ? 'pave' : 'road') : lc === 1 ? 'water' : (lc === 2 || lc === 3 || lc === 6) ? 'grass' : lc === 4 ? 'sand' : 'pave';
   if (S.surface === 'water' && S.v > 0.5) { crash('Into the water', 'water'); return; }
   const sf = SURF[S.surface] || SURF.pave;
-  const wet = C.wet && (S.surface === 'road' || S.surface === 'pave') ? 0.8 : 1;
+  const wet = (S.surface === 'road' || S.surface === 'pave') ? 1 - 0.22 * WX.wet : 1;
   const grip = B.grip * sf.grip * wet * (B.knobby && (S.surface === 'grass' || S.surface === 'sand') ? 1.3 : 1);
   // bridges: you can't ride through the railing
   if (q.in && (MAP.eFlag[q.e] & F_BRIDGE)) S.bridgeE = q.e;
@@ -301,39 +383,50 @@ function step(d) {
 
   // Steering: bicycle model, limited by what the tyres can hold. Push past the limit for too long and it lowsides.
   const steerIn = handsOff ? 0 : clamp(S.steerMouse + (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0), -1, 1) * (T.knee.on ? 0.6 : 1);
-  const gripSteer = Math.atan(grip * G * 1.1 * B.L / Math.max(1, S.v * S.v));
-  const maxSteer = Math.min(0.62 / (1 + S.v / 12), gripSteer) * (S.theta > 0.12 ? 0.5 : 1);
-  S.steer += (steerIn * maxSteer - S.steer) * Math.min(1, d * 7);
+  // Full input asks for ~90% of the grip you have, so normal riding never lowsides; it takes a sudden loss of grip
+  // mid-corner (onto grass or sand at speed) to wash out the front.
+  S.gripSm = S.gripSm === undefined ? grip : S.gripSm + (grip - S.gripSm) * Math.min(1, d * 1.5);
+  const gripSteer = Math.atan(S.gripSm * G * 0.9 * B.L / Math.max(1, S.v * S.v));
+  const maxSteer = Math.min(0.55 / (1 + S.v / 9), gripSteer) * (S.theta > 0.12 ? 0.55 : 1);
+  S.steer += (steerIn * maxSteer - S.steer) * Math.min(1, d * 4.5);
   const yawRate = S.v * Math.tan(S.steer) / B.L;
   S.psi -= yawRate * d;
   S.alat = S.v * yawRate;
   const over = Math.abs(S.alat) / Math.max(0.1, grip * G);
-  if (over > 1.0 && S.v > 7) S.slideT += d; else S.slideT = Math.max(0, S.slideT - d * 2);
-  if (over > 0.86 && S.v > 7) S.skid = Math.max(S.skid, (over - 0.86) * 1.6);
-  if (S.slideT > 0.6) { crash('Lowsided', 'lowside'); return; }
-  S.roll = Math.atan(S.alat / G);
+  if (over > 1.25 && S.v > 9) S.slideT += d; else S.slideT = Math.max(0, S.slideT - d * 2);
+  if (over > 0.95 && S.v > 7) S.skid = Math.max(S.skid, (over - 0.95) * 1.2);
+  if (S.slideT > 0.5) { crash('Lowsided', 'lowside'); return; }
+  S.roll += (Math.atan(S.alat / G) - (S.roll || 0)) * Math.min(1, d * 5);
   const fx = Math.sin(S.psi), fz = Math.cos(S.psi);
   S.x += fx * S.v * d; S.z += fz * S.v * d;
-  const gy = S.onRoad ? roadY(RC[MAP.eCls[q.e]].rank) : (q.e >= 0 && q.d < q.hw + 2.6 && RC[MAP.eCls[q.e]].walk) ? 0.03 : 0;
+  const gy = S.onRoad ? roadY(RC[MAP.eCls[q.e]].rank) : (q.e >= 0 && q.d < q.hw + 2.6 && RC[MAP.eCls[q.e]].walk) ? CURB : 0;
   S.y += (gy - S.y) * Math.min(1, d * 18);
   // skid marks
   if (S.skid > 0.12 && S.onRoad) { S.skidDist += S.v * d; if (S.skidDist > 0.35) { S.skidDist = 0; addSkid(S.x, S.z, S.psi, S.y); } }
 
   // Buildings, poles, trees, signals: a slow bump just stops you; anything faster is a crash
-  const hit = hitAt(S.x + fx * B.L, S.z + fz * B.L, 0.25) || hitAt(S.x, S.z, 0.2);
+  S.spawnGrace = Math.max(0, (S.spawnGrace || 0) - d);
+  let hit = hitAt(S.x + fx * B.L, S.z + fz * B.L, 0.25) || hitAt(S.x, S.z, 0.2);
+  if (hit && S.spawnGrace > 0 && hit !== 'Hit a wall') hit = null;   // just respawned: ride out of anything you landed on
   if (hit) {
     if (S.v < 3.5) { S.x -= fx * 0.35; S.z -= fz * 0.35; if (S.v > 1) sfx.thump(0.4); S.v = 0; }
     else { crash(hit, /pole|light|sign|pillar|tree/i.test(hit) ? 'pole' : 'wall'); return; }
   }
 
-  // Red lights: crossing a signalised junction against the light
-  if (prevE >= 0 && q.e >= 0 && q.e !== prevE && S.v > 4) {
+  // Red lights: entering a signalised junction against the light, judged once per junction
+  // (inside the junction the nearest road flips between the crossing streets, so only the approach counts)
+  S.redCd = Math.max(0, (S.redCd || 0) - d);
+  if (prevE >= 0 && q.e >= 0 && q.e !== prevE && S.v > 4 && S.redCd <= 0) {
     const m2 = MAP, shared = [m2.eA[prevE], m2.eB[prevE]].find((n) => n === m2.eA[q.e] || n === m2.eB[q.e]);
-    if (shared !== undefined && m2.nflag[shared] && RC[m2.eCls[prevE]].drive) {
+    if (shared !== undefined && m2.nflag[shared] && RC[m2.eCls[prevE]].drive && shared !== S.lastJunction) {
+      S.lastJunction = shared;
       const ent = shared === m2.eB[prevE] ? prevE * 2 + 1 : prevE * 2;
-      if (signalState(shared, signalGroup(shared, ent), simTime) === 2) { popup('Ran a red', 'bad'); offense(0.7); }
+      // must actually be heading into the junction along the approach road
+      const [ax, az] = dirFromNode(shared, ent), towards = -(ax * fx + az * fz);
+      if (towards > 0.6 && signalState(shared, signalGroup(shared, ent), simTime) === 2 && copNear(80)) { popup('Ran a red', 'bad'); offense(0.45); S.redCd = 8; }
     }
   }
+  if (S.lastJunction !== undefined && S.lastJunction >= 0 && Math.hypot(MAP.nx[S.lastJunction] - S.x, MAP.nz[S.lastJunction] - S.z) > 40) S.lastJunction = -1;
 
   // Traffic and cops: collisions, close calls, angry drivers
   for (const u of units) {
@@ -345,27 +438,36 @@ function step(d) {
     const flx = (dx + fx * B.L) * c - (dz + fz * B.L) * s, flz = (dx + fx * B.L) * s + (dz + fz * B.L) * c;
     if ((Math.abs(lx) < hx && Math.abs(lz) < hz) || (Math.abs(flx) < hx && Math.abs(flz) < hz)) {
       const rel = Math.hypot(fx * S.v - Math.sin(u.yaw) * u.v, fz * S.v - Math.cos(u.yaw) * u.v);
-      if (u.kind === 'car') { addHeat(1, true); say(u, pick(Math.random, CURSES_HIT), false); sfx.horn(u); }
-      else addHeat(1.2, true);
-      crash(u.kind === 'car' ? 'Hit a car' : 'Rammed by the cops', 'car', u, rel); return;
+      if (rel < 5 || S.spawnGrace > 0) {
+        // a nudge, not a crash: get pushed out sideways and lose speed
+        const side = lx >= 0 ? 1 : -1, nx = c * side, nz = -s * side;
+        S.x += nx * (hx - Math.abs(lx) + 0.2); S.z += nz * (hx - Math.abs(lx) + 0.2);
+        S.v *= 0.6; u.v *= 0.7;
+        if ((u.bumpCd || 0) <= 0) { sfx.thump(0.5); u.bumpCd = 1; if (u.kind === 'car') { sfx.horn(u); say(u, pick(Math.random, CURSES), true); } }
+        continue;
+      }
+      if (u.kind === 'car') { offense(0.8); say(u, pick(Math.random, CURSES_HIT), false); sfx.horn(u); }
+      else if (!u.chasing) addHeat(1);               // you rode into a patrol car
+      crash(u.kind === 'car' ? 'Hit a car' : u.chasing ? 'Rammed by the cops' : 'Hit a cop car', 'car', u, rel); return;
     }
+    u.bumpCd = (u.bumpCd || 0) - d;
     const dist = Math.hypot(dx, dz);
     u.nearCd -= d;
     if (dist < 2.8 && S.v > 6 && u.nearCd <= 0 && u.kind === 'car') {
       u.nearCd = 3; nearMisses++;
       const pts = Math.round((W.active ? 500 : 200) * heatMult());
       banked += pts; popup(`${W.active ? 'Wheelie close call' : 'Close call'} +${pts}`, 'good');
-      offense(0.25);
+      offense(0.12);
       if (Math.random() < 0.7) { sfx.horn(u); say(u, pick(Math.random, CURSES), Math.random() < 0.3); }
     }
   }
 
-  // Offences a cop might see
+  // Offences a cop might see (only counts when one is close enough to see you)
   const onWalk = !S.onRoad && q.e >= 0 && q.d < q.hw + 2.8 && RC[MAP.eCls[q.e]].walk;
-  if (W.active) offense((anyTrick ? 0.6 : 0.3) * d);
-  if (q.e >= 0 && RC[MAP.eCls[q.e]].v && S.v > RC[MAP.eCls[q.e]].v * 1.3 + 4) offense(0.18 * d);
-  if (onWalk && S.v > 4) offense(0.12 * d);
-  if ((S.surface === 'grass') && S.v > 4) offense(0.08 * d);
+  if (W.active) offense((anyTrick ? 0.22 : 0.1) * d);
+  if (q.e >= 0 && RC[MAP.eCls[q.e]].v && S.v > RC[MAP.eCls[q.e]].v * 1.4 + 5) offense(0.07 * d);
+  if (onWalk && S.v > 6) offense(0.05 * d);
+  if ((S.surface === 'grass') && S.v > 6) offense(0.03 * d);
 
   // Scoring
   if (S.theta > 0.15) {
@@ -526,7 +628,8 @@ function crashStep(d) {
   if (S.crashT > 3.4) { if (bails <= 0) gameOver(); else respawn(); }
 }
 function respawn() {
-  const x = S.cr ? S.cr.x : S.x, z = S.cr ? S.cr.z : S.z;
+  let x = S.cr ? S.cr.x : S.x, z = S.cr ? S.cr.z : S.z;
+  if (store.get('wc-respawn', 'crash') === 'spawn') { const sp = spawnPoint(); x = sp[0]; z = sp[1]; }
   placeOnRoad(x, z, S.cpsi ?? S.psi, 5, true);
   for (const u of units) if (u.on && Math.hypot(u.x - S.x, u.z - S.z) < 25) deactivate(u);
   S.scrape = 0; S.bodySlide = 0;
@@ -623,7 +726,7 @@ function copNear(range) {
   for (const u of units) if (u.on && u.kind !== 'car' && Math.hypot(u.x - S.x, u.z - S.z) < range) return true;
   return !!(heli && heli.on && Math.hypot(heli.x - S.x, heli.z - S.z) < 70);
 }
-function offense(amount) { if (copNear(90)) addHeat(amount, false); }
+function offense(amount) { if (copNear(70)) addHeat(amount, false); }
 function addHeat(amount) {
   const before = stars();
   heat = Math.min(5.99, heat + amount);
@@ -651,7 +754,7 @@ function updatePolice(d) {
     heli.g.visible = true; popup('Air support', 'cop');
   }
   if (st >= 1) {
-    if (copNear(120)) unseenT = 0; else unseenT += d;
+    if (copNear(120) && !S.riding) unseenT = 0; else unseenT += d;
     if (unseenT > 6) heat = Math.max(0, heat - 0.35 * d);
     if (heat < 1 && chaseMax >= 1) {
       const bonus = 400 * chaseMax; banked += bonus; popup(`Lost them +${bonus.toLocaleString()}`, 'good');
@@ -663,7 +766,7 @@ function updatePolice(d) {
 }
 function updateUnits(d) {
   let cars = 0;
-  const px = S.crashed && S.cb ? S.cb.x : S.x, pz = S.crashed && S.cb ? S.cb.z : S.z;
+  const px = S.riding ? 1e9 : S.crashed && S.cb ? S.cb.x : S.x, pz = S.riding ? 1e9 : S.crashed && S.cb ? S.cb.z : S.z;
   for (const u of units) {
     if (!u.on) continue;
     const dist = Math.hypot(u.x - S.x, u.z - S.z);
@@ -695,11 +798,17 @@ function updateUnits(d) {
       if (free && u.mode !== 'free') u.mode = 'free';
       if (!free && u.mode === 'free') { if (!snapToGraph(u)) { deactivate(u); continue; } }
       const top = Math.max((u.kind === 'moto' ? 24 : 21) + 0.8 * stars(), u.mode === 'graph' ? RC[MAP.eCls[u.e]].v * 1.35 : 0);
-      const target = u.chasing ? (u.mode === 'free' ? Math.min(top, 4 + dist * 1.1) : top) : graphTarget(u);
+      // chasing cops close in and match your speed to box you in rather than ploughing into you;
+      // patrols drive like traffic and brake for you
+      let target = u.chasing ? (u.mode === 'free' ? Math.min(top, Math.max(0, S.v * 0.95 + (dist - 6) * 0.9)) : top) : graphTarget(u);
+      if (!u.chasing) {
+        const dx = S.x - u.x, dz = S.z - u.z, ahead = dx * fx + dz * fz, lat = Math.abs(-dx * fz + dz * fx);
+        if (ahead > 1 && ahead < 14 && lat < 2.2) target = Math.min(target, Math.max(0, (ahead - 6) * 0.9));
+      }
       if (u.hitT > 0) u.v *= Math.exp(-d * 3);
       if (u.mode === 'free') driveFree(u, d, target); else driveGraph(u, d, target);
       if (!u.on) continue;
-      if (u.chasing && dist < 4 && S.v < 3 && !S.crashed) { u.bustT += d; if (u.bustT > 1.3) { busted(); return; } } else u.bustT = Math.max(0, u.bustT - d);
+      if (u.chasing && dist < 4 && S.v < 3 && !S.crashed && !S.riding) { u.bustT += d; if (u.bustT > 1.3) { busted(); return; } } else u.bustT = Math.max(0, u.bustT - d);
       const flashOn = Math.floor(performance.now() / 150) % 2 === 0;
       u.lights[0].material = u.chasing && flashOn ? carMats.red : carMats.off;
       u.lights[1].material = u.chasing && !flashOn ? carMats.blue : carMats.off;
@@ -868,7 +977,9 @@ function updateCamera(dt) {
   rig.head.visible = !(inPlay && pov === 'first' && !(S.crashed && reduceMotion));
   let fovT = 66 + Math.min(16, S.v * 0.45);
   let up = 0;
-  if (state === 'menu') {
+  if (S.riding && RIDE.train && state !== 'menu') {
+    trainCamera(dt); fovT = camera.fov;
+  } else if (state === 'menu') {
     menuT += dt * 0.25;
     const a = S.psi + Math.PI * 0.75 + Math.sin(menuT) * 0.7;
     tmp.set(S.x + Math.sin(a) * 4.4, 1.6, S.z + 0.6 + Math.cos(a) * 4.4);
@@ -922,9 +1033,16 @@ function updateCamera(dt) {
     if (pov === 'side') { back = 1.2; high = 1.25; lat = 4.6; look = 1.5; }
     if (pov === 'drone') { back = 9; high = 24; look = 8; }
     tmp.set(S.x - fx * back + rx * lat, S.y + high + S.theta * 0.5, S.z - fz * back + rz * lat);
+    // keep the camera on your side of any wall: march from the rider out to where the camera wants to be
+    if (pov !== 'drone') {
+      const sx = S.x, sz = S.z, dx = tmp.x - sx, dz = tmp.z - sz, dist = Math.hypot(dx, dz);
+      let ok = dist;
+      for (let k = 0.5; k <= dist + 0.6; k += 0.5) if (buildingAt(sx + dx / dist * k, sz + dz / dist * k, 0.35) >= 0) { ok = Math.max(0.4, k - 0.7); break; }
+      if (ok < dist) { tmp.x = sx + dx / dist * ok; tmp.z = sz + dz / dist * ok; tmp.y += (dist - ok) * 0.35; }
+    }
     if (camSnap) { camPos.copy(tmp); lookAt.set(S.x + fx * look, S.y + 1, S.z + fz * look); }
     camPos.lerp(tmp, 1 - Math.exp(-dt * (pov === 'side' ? 8 : 5)));
-    if (pov !== 'drone' && buildingAt(camPos.x, camPos.z, 0.4) >= 0) camPos.lerp(tmp2.set(S.x, camPos.y, S.z), 0.3);
+    if (pov !== 'drone' && buildingAt(camPos.x, camPos.z, 0.3) >= 0) camPos.copy(tmp);
     lookAt.lerp(tmp2.set(S.x + fx * look, S.y + 1.0 + S.theta * 0.6, S.z + fz * look), 1 - Math.exp(-dt * 8));
     camera.position.copy(camPos); camera.up.set(0, 1, 0); camera.lookAt(lookAt);
     if (pov === 'side') fovT = 58;
@@ -943,6 +1061,7 @@ function updateCamera(dt) {
   // world things that follow the camera
   sky.position.copy(camera.position);
   backdrop.position.set(camera.position.x, 0, camera.position.z);
+  clouds.grp.position.set(camera.position.x, 0, camera.position.z);
   const sd = C.sunDir || [0, 0.3, 1];
   sun.position.copy(camera.position).add(tmp.set(sd[0], sd[1], sd[2]).normalize().multiplyScalar(1600)); sun.lookAt(camera.position);
   ground.position.x = camera.position.x; ground.position.z = camera.position.z;
@@ -969,7 +1088,7 @@ function updateCamera(dt) {
   // flashing light from the nearest chasing cop, at night or dusk
   let near = null, nd = 60;
   for (const u of units) if (u.on && u.chasing) { const d = Math.hypot(u.x - S.x, u.z - S.z); if (d < nd) { nd = d; near = u; } }
-  if (near && (C.night || C.dusk || C.rain)) { const on = Math.floor(performance.now() / 150) % 2; copLight.color.set(on ? '#ff2236' : '#2b6bff'); copLight.intensity = 2.5; copLight.position.set(near.x, 2.2, near.z); }
+  if (near && (C.night || C.dusk || WX.cloud > 0.6)) { const on = Math.floor(performance.now() / 150) % 2; copLight.color.set(on ? '#ff2236' : '#2b6bff'); copLight.intensity = 2.5; copLight.position.set(near.x, 2.2, near.z); }
   else copLight.intensity = 0;
 }
 
@@ -994,25 +1113,8 @@ function drawMinimap() {
       mapCtx.beginPath(); mapCtx.arc(px, py, u.kind === 'car' ? 2 : 3.5, 0, TAU); mapCtx.fill();
     }
     if (heli && heli.on) { const [px, py] = P(heli.x, heli.z); mapCtx.strokeStyle = fl ? '#ff2236' : '#2b6bff'; mapCtx.lineWidth = 2; mapCtx.beginPath(); mapCtx.moveTo(px - 5, py); mapCtx.lineTo(px + 5, py); mapCtx.moveTo(px, py - 5); mapCtx.lineTo(px, py + 5); mapCtx.stroke(); }
+    drawRouteMini(mapCtx, P);
   });
-}
-const bigCtx = $('#bigmapCv').getContext('2d');
-function drawBigMap() {
-  if (!cityMapCv) return;
-  const g = bigCtx, Wc = 1200, Hc = 760, m = MAP;
-  g.fillStyle = '#0c0d13'; g.fillRect(0, 0, Wc, Hc);
-  const sc = Math.min(Wc / cityMapCv.width, Hc / cityMapCv.height), w = cityMapCv.width * sc, h = cityMapCv.height * sc, ox = (Wc - w) / 2, oy = (Hc - h) / 2;
-  g.drawImage(cityMapCv, ox, oy, w, h);
-  const P = (x, z) => [ox + (m.gx1 - x) * cityMapK * sc, oy + (m.gz1 - z) * cityMapK * sc];
-  const fl = Math.floor(performance.now() / 250) % 2;
-  for (const u of units) if (u.on && u.kind !== 'car') { const [px, py] = P(u.x, u.z); g.fillStyle = fl ? '#ff2236' : '#2b6bff'; g.beginPath(); g.arc(px, py, 4, 0, TAU); g.fill(); }
-  const [px, py] = P(S.x, S.z);
-  g.save(); g.translate(px, py); g.rotate(-S.psi);
-  g.fillStyle = '#ff3d7f'; g.strokeStyle = '#fff'; g.lineWidth = 2;
-  g.beginPath(); g.moveTo(0, -12); g.lineTo(8, 9); g.lineTo(0, 4); g.lineTo(-8, 9); g.closePath(); g.fill(); g.stroke();
-  g.restore();
-  g.fillStyle = '#f3efe7'; g.font = '800 22px "Archivo", sans-serif'; g.textAlign = 'left';
-  g.fillText(`${C.name.toUpperCase()} · ${C.region}`, 16, 32);
 }
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 function updateHUD(dt) {
@@ -1035,8 +1137,8 @@ function updateHUD(dt) {
   const hint = $('#hint');
   if (performance.now() < hintUntil && !W.active) { hint.hidden = false; hint.textContent = B.type === 'gas' ? 'Roll in first or second, lean back (pull the mouse toward you), rev it and tap Space to dump the clutch. N opens the city map.' : 'Roll slow, lean back (pull the mouse toward you) and hold W, or tap Space to pop it up. N opens the city map.'; } else hint.hidden = true;
   updateBubbles();
+  navTick(dt);
   mapT += dt; if (mapT > 0.1) { mapT = 0; drawMinimap(); }
-  if (mapOpen) drawBigMap();
   // gear / rpm
   if (B.type === 'gas') {
     $('#gear').textContent = S.v < 0.3 && S.thr < 0.05 ? 'N' : String(S.gear);
@@ -1049,7 +1151,10 @@ function updateHUD(dt) {
   // street name: on a road, its name and highway shield; otherwise sidewalk / park / beach
   let street = '';
   const q = roadQuery(S.x, S.z, 10);
-  if (q.e >= 0 && (q.in || q.d < q.hw + 3)) {
+  if (S.riding && RIDE.train) {
+    const t = RIDE.train, ln = MAP.lines[t.line], a = ln.stations[0], b = ln.stations[ln.stations.length - 1];
+    street = `${esc(TRANSIT[cityKey] || 'Train')}<span class="shield">${esc((t.dir > 0 ? b : a).name)}</span>`;
+  } else if (q.e >= 0 && (q.in || q.d < q.hw + 3)) {
     const lb = roadLabel(q.e);
     street = `${esc(q.in ? lb.name : 'Sidewalk · ' + (lb.name || lb.ref))}${lb.ref && q.in ? `<span class="shield">${esc(lb.ref)}</span>` : ''}`;
   } else {
@@ -1086,19 +1191,23 @@ function frame(now) {
       simTime += rem;
       while (rem > 1e-6) {
         const d = Math.min(1 / 120, rem);
-        step(d); if (state !== 'play') break;
+        if (!S.riding) step(d); if (state !== 'play') break;
         updateUnits(d); if (state !== 'play') break;
         updatePolice(d);
         rem -= d;
       }
       updateFX(dt * ts);
+      updatePeds(dt * ts);
+      updateTrains(dt * ts);
+      if (state === 'play') updateRide(dt);
+      updateWeather(dt, (msg) => popup(msg, ''));
     }
     const fx = S.crashed && S.cb ? S.cb.x : S.x, fz = S.crashed && S.cb ? S.cb.z : S.z;
     updateTiles(fx, fz, false);
     if (state === 'play') updateHUD(dt);
     dashT += dt; if (dashT > 0.1) { dashT = 0; drawDash(); }
   } else if (state === 'play' && mapOpen) { drawBigMap(); }
-  else if (state === 'menu') { updateTiles(S.x, S.z, false); simTime += dt; }
+  else if (state === 'menu') { updateTiles(S.x, S.z, false); simTime += dt; updateWeather(dt, null); }
   updateSignals(simTime);
   placeRig(state === 'play' && !mapOpen ? dt : 0);
   updateCamera(dt);

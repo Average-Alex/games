@@ -78,9 +78,26 @@
   .bubble.honk { background: #ffd23a; }
   .bubble.honk::after { border-top-color: #ffd23a; }
   #flash { position: absolute; inset: 0; pointer-events: none; opacity: 0; background: radial-gradient(ellipse at center, rgba(255, 255, 255, .0) 35%, rgba(170, 0, 20, .75) 100%); }
-  #bigmap { position: absolute; inset: 6%; border-radius: 6px; overflow: hidden; background: #0c0d13; box-shadow: 0 0 0 1px rgba(243, 239, 231, .25), 0 20px 60px rgba(0, 0, 0, .7); }
-  #bigmap canvas { width: 100%; height: 100%; display: block; }
-  #bigmap .label { position: absolute; left: 12px; bottom: 8px; }
+  #bigmap { position: absolute; inset: 6%; border-radius: 6px; overflow: hidden; background: #0c0d13; box-shadow: 0 0 0 1px rgba(243, 239, 231, .25), 0 20px 60px rgba(0, 0, 0, .7); pointer-events: auto; }
+  #bigmap canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
+  #bigmap canvas.drag { cursor: grabbing; }
+  .bm-bar { position: absolute; top: 10px; right: 10px; display: flex; gap: 8px; align-items: center; }
+  .bm-bar input { font: inherit; font-size: 14px; width: min(340px, 40cqw); padding: 7px 10px; border-radius: 4px; border: 1px solid rgba(243, 239, 231, .4); background: rgba(16, 17, 25, .9); color: var(--ink); }
+  .bm-btn { font: inherit; font-size: 13px; font-weight: 800; padding: 7px 12px; border-radius: 4px; border: 0; background: rgba(243, 239, 231, .14); color: var(--ink); cursor: pointer; }
+  .bm-btn:hover { background: rgba(243, 239, 231, .24); }
+  .bm-btn:focus-visible, .bm-bar input:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+  #bigmap .bm-hint { position: absolute; left: 12px; bottom: 8px; color: var(--ink); text-shadow: 0 1px 3px #000; max-width: 70%; }
+  #bigmap .bm-attrib { position: absolute; right: 12px; bottom: 8px; font-size: 10px; letter-spacing: .08em; }
+  .bm-bar .seg { background: rgba(16, 17, 25, .9); }
+  .bm-respawn { position: absolute; left: 12px; top: 46px; background: rgba(16, 17, 25, .85); padding: 5px 8px; border-radius: 4px; color: var(--ink); }
+  #prompt { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); font-size: 18px; font-weight: 800; padding: 8px 16px; border-radius: 4px; background: rgba(16, 17, 25, .82); border-left: 4px solid #2b6bff; white-space: nowrap; }
+  #prompt b { color: #9cc4ff; }
+  #nav { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding: 8px 12px 8px 8px; background: rgba(16, 17, 25, .78); border-left: 4px solid #ff3dd1; border-radius: 3px; max-width: 40cqw; text-shadow: none; }
+  #nav svg { width: 38px; height: 38px; flex: 0 0 auto; color: #ff3dd1; }
+  #navArrow { transform-origin: 20px 20px; transition: transform .25s; }
+  .nav-next { font-size: 17px; font-weight: 900; font-stretch: 80%; line-height: 1.15; }
+  .nav-next b { font-family: var(--digits); color: #ff3dd1; margin-right: 6px; }
+  .nav-rest { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-top: 2px; }
   .attrib { position: absolute; right: 6px; bottom: 2px; font-size: 10px; color: rgba(243, 239, 231, .55); pointer-events: auto; }
   .attrib a { color: inherit; }
 
@@ -106,6 +123,14 @@
   .stat { display: grid; grid-template-columns: 62px 1fr; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; font-stretch: 80%; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
   .stat span { height: 5px; background: rgba(243, 239, 231, .15); border-radius: 3px; overflow: hidden; }
   .stat span i { display: block; height: 100%; background: var(--teal); }
+  .rider { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 6px 18px; }
+  .rider .opt-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .rider .opt-row > span { width: 70px; flex: 0 0 auto; font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+  .rider .sws { display: flex; flex-wrap: wrap; gap: 5px; }
+  .rider .sws button { width: 22px; height: 22px; border-radius: 50%; border: 2px solid rgba(243, 239, 231, .25); cursor: pointer; padding: 0; }
+  .rider .sws button[aria-pressed="true"] { border-color: var(--ink); box-shadow: 0 0 0 2px var(--pink); }
+  .rider .sws button.stock { background: conic-gradient(#888 0 25%, #ddd 0 50%, #888 0 75%, #ddd 0) !important; }
+  .rider .sws button:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
   .row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; }
   .seg { display: inline-flex; border: 1px solid rgba(243, 239, 231, .3); border-radius: 4px; overflow: hidden; }
   .seg button { font: inherit; font-size: 13px; font-weight: 700; padding: 7px 12px; background: transparent; color: var(--muted); border: 0; cursor: pointer; }
@@ -146,6 +171,10 @@
       <div class="rpm" id="rpmBar" hidden><i id="rpmFill"></i></div>
       <div class="street" id="street"></div>
       <div class="label" id="where"></div>
+      <div id="nav" hidden>
+        <svg viewBox="0 0 40 40" aria-hidden="true"><g id="navArrow"><path d="M20 4 L31 17 H24 V34 H16 V17 H9 Z" fill="currentColor"/></g></svg>
+        <div><div class="nav-next" id="navNext"></div><div class="nav-rest" id="navRest"></div></div>
+      </div>
     </div>
     <div class="corner tr">
       <div class="score" id="score">0</div>
@@ -161,6 +190,7 @@
     </div>
     <div id="feed"></div>
     <div id="hint" hidden></div>
+    <div id="prompt" hidden></div>
     <div id="gauge" aria-hidden="true">
       <svg viewBox="0 0 220 124">
         <path id="gArc" fill="none" stroke="rgba(243,239,231,.25)" stroke-width="10" stroke-linecap="round"></path>
@@ -173,7 +203,27 @@
     </div>
     <div class="corner bl keys" id="keyhint">Mouse ↔ steer · mouse ↕ lean · W throttle · S brake · Space pop / clutch · Shift / Q lean · 1–5 tricks · V camera · N map · R reset · Esc pause · M sound</div>
     <div class="corner br label" id="povLabel"></div>
-    <div id="bigmap" hidden><canvas id="bigmapCv" width="1200" height="760"></canvas><div class="label">N closes the map · Map data © OpenStreetMap contributors</div></div>
+    <div id="bigmap" hidden>
+      <canvas id="bigmapCv" width="1200" height="760" aria-label="City map. Click to set a destination."></canvas>
+      <div class="bm-bar">
+        <input id="navSearch" list="navList" type="search" placeholder="Go to… city, neighbourhood or street" aria-label="Search for a destination" autocomplete="off">
+        <datalist id="navList"></datalist>
+        <div class="seg" role="group" aria-label="What a click on the map sets">
+          <button type="button" id="clickDest" aria-pressed="true">Destination</button>
+          <button type="button" id="clickSpawn" aria-pressed="false">Spawn point</button>
+        </div>
+        <button type="button" id="navClear" class="bm-btn">Clear route</button>
+        <button type="button" id="navMe" class="bm-btn">Find me</button>
+      </div>
+      <div class="label bm-hint" id="bmHint">Click to set a destination · scroll to zoom · drag to pan · N or Esc to ride</div>
+      <label class="opt bm-respawn" for="respawnMode">After a crash
+        <select id="respawnMode">
+          <option value="crash">Respawn where I crashed</option>
+          <option value="spawn">Respawn at my spawn point</option>
+        </select>
+      </label>
+      <div class="label bm-attrib">Map data © OpenStreetMap contributors</div>
+    </div>
   </div>
 
   <section id="start" class="panel">
@@ -194,6 +244,10 @@
           </div>
         </div>
         <div class="cards" id="bikeCards"></div>
+      </div>
+      <div class="pick">
+        <h3>Rider &amp; paint</h3>
+        <div class="rider" id="riderOpts"></div>
       </div>
       <div class="ctl">
         <div><kbd>W</kbd>Throttle</div>
@@ -217,6 +271,15 @@
             <option value="low">Low</option>
             <option value="med">Medium</option>
             <option value="high">High</option>
+          </select>
+        </label>
+        <label class="opt" for="weatherSel">Weather
+          <select id="weatherSel">
+            <option value="auto">Changes</option>
+            <option value="clear">Clear</option>
+            <option value="cloudy">Cloudy</option>
+            <option value="rain">Rain</option>
+            <option value="fog">Fog</option>
           </select>
         </label>
         <label class="opt" for="sens">Mouse <input id="sens" type="range" min="0.4" max="2.2" step="0.1" value="1"></label>
@@ -273,6 +336,8 @@
 <script src="wheelie-city/vehicles.js"></script>
 <script src="wheelie-city/bike.js"></script>
 <script src="wheelie-city/audio.js"></script>
+<script src="wheelie-city/nav.js"></script>
+<script src="wheelie-city/life.js"></script>
 <script src="wheelie-city/play.js"></script>
 </body>
 </html>

@@ -209,7 +209,7 @@ const sfx = (() => {
   }
   function update(dt) {
     if (!ctx || !ready) return;
-    const t = ctx.currentTime, play = state === 'play', live = play && !S.crashed;
+    const t = ctx.currentTime, play = state === 'play', live = play && !S.crashed && !S.riding;
     listener();
     const v = live ? S.v : 0;
     engine.post({ rpm: S.rpm || 0, thr: live ? S.thr : 0, speed: v, on: live || (state === 'menu') ? 1 : 0, lim: S.limiter ? 1 : 0 });
@@ -217,7 +217,7 @@ const sfx = (() => {
     windG.gain.setTargetAtTime(live ? Math.min(0.5, v * v * 0.0009) : 0, t, 0.15);
     windF.frequency.setTargetAtTime(300 + v * 35, t, 0.2);
     buffG.gain.setTargetAtTime(live ? Math.min(0.5, Math.max(0, v - 14) * 0.03) * (0.6 + 0.4 * Math.random()) : 0, t, 0.05);
-    rainG.gain.setTargetAtTime(play && C.rain ? 0.05 : 0, t, 0.3);
+    rainG.gain.setTargetAtTime(play ? 0.07 * WX.rain : 0, t, 0.3);
     cityG.gain.setTargetAtTime(play ? 0.05 : 0, t, 0.5);
     scrapeG.gain.setTargetAtTime(S.scrape || 0, t, 0.04); scrapeF.frequency.setTargetAtTime(1800 + Math.random() * 1600, t, 0.02);
     slideG.gain.setTargetAtTime(S.bodySlide || 0, t, 0.05);

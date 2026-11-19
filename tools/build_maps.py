@@ -76,6 +76,43 @@ def parse_m(v):
         return None
 
 
+def is_station(t):
+    if not t.get('name'): return False
+    if t.get('railway') == 'station' or (t.get('public_transport') == 'station' and t.get('railway') != 'halt'):
+        return t.get('station') in (None, 'subway', 'light_rail', 'monorail') or any(t.get(k) == 'yes' for k in ('subway', 'light_rail', 'monorail'))
+    return False
+
+
+def poi_kind(t):
+    if not t.get('name'): return None
+    if t.get('leisure') == 'stadium' or t.get('building') == 'stadium': return 'stadium'
+    if t.get('tourism') in ('attraction', 'museum', 'gallery', 'zoo', 'aquarium', 'theme_park', 'viewpoint'): return t.get('tourism')
+    if t.get('historic') in ('monument', 'memorial', 'castle', 'landmark', 'building'): return 'landmark'
+    if t.get('amenity') in ('theatre', 'arts_centre', 'casino', 'townhall', 'university', 'library', 'conference_centre'): return t.get('amenity')
+    if t.get('man_made') in ('tower', 'lighthouse'): return 'tower'
+    if t.get('shop') == 'mall': return 'mall'
+    if t.get('building') in ('cathedral', 'train_station') or t.get('amenity') == 'place_of_worship' and t.get('building') == 'cathedral': return 'landmark'
+    return None
+
+
+CSS = {'white': 0xf2f2f0, 'grey': 0x8c8c8c, 'gray': 0x8c8c8c, 'darkgrey': 0x5a5a5a, 'lightgrey': 0xc8c8c8, 'black': 0x2a2a2a, 'red': 0xa83a32,
+       'brown': 0x7a5a44, 'maroon': 0x6e2a2a, 'beige': 0xd8c8a8, 'tan': 0xc8a882, 'yellow': 0xe0c860, 'orange': 0xd8853a, 'blue': 0x4a6a9a,
+       'green': 0x5a7a5a, 'pink': 0xe8b0b8, 'silver': 0xb8bcc0, 'cream': 0xeee4cc, 'ivory': 0xf0ead6, 'navy': 0x2a3a5a, 'teal': 0x3a7a7a}
+MATERIAL = {'brick': 1, 'glass': 2, 'mirror': 2, 'concrete': 3, 'wood': 4, 'timber_framing': 4, 'metal': 5, 'steel': 5, 'stone': 6, 'sandstone': 6,
+            'limestone': 6, 'granite': 6, 'marble': 6, 'plaster': 7, 'stucco': 7, 'render': 7, 'vinyl': 4, 'cement_block': 3}
+
+
+def parse_colour(v):
+    if not v: return -1
+    v = v.strip().lower()
+    if v.startswith('#') and len(v) in (4, 7):
+        try:
+            if len(v) == 4: v = '#' + ''.join(c * 2 for c in v[1:])
+            return int(v[1:], 16)
+        except ValueError: return -1
+    return CSS.get(v.replace(' ', ''), -1)
+
+
 class Handler(osmium.SimpleHandler):
     def __init__(self, proj, inbox):
         super().__init__()
@@ -83,6 +120,7 @@ class Handler(osmium.SimpleHandler):
         self.ways, self.rail, self.coast = [], [], []
         self.signals, self.trees, self.places = set(), [], []
         self.buildings, self.land, self.admin = [], [], []
+        self.transit, self.stations, self.pois, self.stops = [], [], [], []
 
     def node(self, n):
         t = n.tags
@@ -92,12 +130,18 @@ class Handler(osmium.SimpleHandler):
             self.signals.add(n.id); return
         loc = n.location
         if not loc.valid(): return
+        x, z = self.proj(loc.lon, loc.lat)
+        if not self.inbox(x, z, 3000): return
         if t.get('natural') == 'tree':
-            x, z = self.proj(loc.lon, loc.lat)
             if self.inbox(x, z, 0): self.trees.append((x, z))
         elif t.get('place') in ('city', 'town', 'village', 'suburb', 'neighbourhood', 'quarter', 'borough') and t.get('name'):
-            x, z = self.proj(loc.lon, loc.lat)
-            if self.inbox(x, z, 3000): self.places.append((t.get('name'), t.get('place'), round(x), round(z)))
+            self.places.append((t.get('name'), t.get('place'), round(x), round(z)))
+        elif is_station(t):
+            self.stations.append((t.get('name'), round(x), round(z)))
+        elif hw == 'bus_stop':
+            if self.inbox(x, z, 0): self.stops.append((round(x * 2) / 2, round(z * 2) / 2, 1 if t.get('shelter') == 'yes' else 0))
+        k = poi_kind(t)
+        if k: self.pois.append((t.get('name'), k, round(x), round(z)))
 
     def pts(self, nodes):
         out = []
@@ -126,7 +170,14 @@ class Handler(osmium.SimpleHandler):
             flags = (1 if oneway else 0) | (2 if t.get('bridge') not in (None, 'no') else 0) | (4 if t.get('tunnel') not in (None, 'no') else 0) \
                 | (8 if t.get('junction') in ('roundabout', 'circular') else 0)
             self.ways.append((ROAD[hw], flags, lanes, t.get('name') or '', t.get('ref') or '', p))
-        elif t.get('railway') in ('light_rail', 'subway', 'monorail', 'rail') and t.get('bridge') not in (None, 'no') and t.get('tunnel') in (None, 'no'):
+        elif t.get('railway') in ('light_rail', 'subway', 'monorail') and t.get('service') is None:
+            # rapid transit track: keep all of it (ground, elevated, underground) so trains can run the line
+            p = self.pts(w.nodes)
+            if p and any(self.inbox(x, z, 300) for x, z, _ in p):
+                tunnel = t.get('tunnel') not in (None, 'no') or (t.get('layer', '0').lstrip('-').isdigit() and int(t.get('layer', '0')) < 0)
+                flag = 2 if tunnel else 1 if t.get('bridge') not in (None, 'no') else 0
+                self.transit.append((flag, t.get('railway'), [(x, z) for x, z, _ in p]))
+        elif t.get('railway') == 'rail' and t.get('bridge') not in (None, 'no') and t.get('tunnel') in (None, 'no'):
             p = self.pts(w.nodes)
             if p and any(self.inbox(x, z, 150) for x, z, _ in p): self.rail.append(p)
         elif t.get('natural') == 'coastline':
@@ -135,7 +186,19 @@ class Handler(osmium.SimpleHandler):
 
     def area(self, a):
         t = a.tags
-        if 'building' in t and t.get('building') not in ('no', 'roof', 'construction'):
+        if t.get('name') and (poi_kind(t) or is_station(t)):
+            for ring in a.outer_rings():
+                p = [self.proj(n.lon, n.lat) for n in ring]
+                if len(p) >= 3:
+                    cx, cz = sum(q[0] for q in p) / len(p), sum(q[1] for q in p) / len(p)
+                    if self.inbox(cx, cz, 0):
+                        if is_station(t): self.stations.append((t.get('name'), round(cx), round(cz)))
+                        else: self.pois.append((t.get('name'), poi_kind(t), round(cx), round(cz)))
+                break
+        if 'building' in t and t.get('building') not in ('no', 'roof', 'construction', 'canopy', 'carport', 'bridge', 'ruins', 'transformer_tower', 'ship'):
+            # floating (skywalks, parkades over streets) and underground buildings would stand in the street
+            if (parse_m(t.get('min_height')) or 0) > 0.5 or (parse_m(t.get('building:min_level')) or 0) > 0: return
+            if t.get('location') in ('underground', 'roof') or t.get('layer', '0').startswith('-'): return
             for ring in a.outer_rings():
                 p = [self.proj(n.lon, n.lat) for n in ring]
                 if len(p) < 4 or not self.inbox(p[0][0], p[0][1], 50): break
@@ -170,7 +233,7 @@ def build(key, osmdir):
     def inbox(x, z, m):
         return gx0 - m <= x <= gx1 + m and gz0 - m <= z <= gz1 + m
 
-    cache = os.path.join(osmdir, f'{key}.parsed.pickle')
+    cache = os.path.join(osmdir, f'{key}.parsed2.pickle')
     h = Handler(proj, inbox)
     if os.path.exists(cache) and os.path.getmtime(cache) > os.path.getmtime(os.path.join(osmdir, cfg['src'])):
         print(f'[{key}] using cached parse', flush=True)
@@ -180,7 +243,7 @@ def build(key, osmdir):
         print(f'[{key}] reading {cfg["src"]} ...', flush=True)
         h.apply_file(os.path.join(osmdir, cfg['src']), locations=True, idx='flex_mem')
         with open(cache, 'wb') as f:
-            pickle.dump({k_: getattr(h, k_) for k_ in ('ways', 'rail', 'coast', 'signals', 'trees', 'places', 'buildings', 'land', 'admin')}, f)
+            pickle.dump({k_: getattr(h, k_) for k_ in ('ways', 'rail', 'coast', 'signals', 'trees', 'places', 'buildings', 'land', 'admin', 'transit', 'stations', 'pois', 'stops')}, f)
     print(f'[{key}] ways {len(h.ways)} buildings {len(h.buildings)} land {len(h.land)} coast {len(h.coast)} rail {len(h.rail)} trees {len(h.trees)} places {len(h.places)} admin {len(h.admin)}', flush=True)
 
     # ---------- road graph: split ways at shared nodes
@@ -246,7 +309,18 @@ def build(key, osmdir):
             ht = lv * 3.2 + 1.5 if lv else DEF_H[k] + (0 if area < 400 else min(10, area / 300))
         ht = max(2.5, min(600, ht))
         if len(ring) > 60: ring = ring[:60]
-        bl.append((ring, k, ht))
+        # look: material, colour, roof, shopfront, landmark
+        mat = MATERIAL.get((t.get('building:material') or t.get('building:facade:material') or '').lower(), 0)
+        col = parse_colour(t.get('building:colour') or t.get('building:color'))
+        roof = t.get('roof:shape', '')
+        shop = 1 if ('shop' in t or t.get('amenity') in ('restaurant', 'cafe', 'fast_food', 'bar', 'pub', 'bank', 'pharmacy', 'ice_cream')
+                     or t.get('building') in ('retail', 'commercial', 'supermarket')) else 0
+        nm = t.get('name') or ''
+        landmark = 1 if nm and (poi_kind(t) or t.get('building') in ('stadium', 'cathedral', 'church', 'train_station', 'museum', 'civic', 'government')
+                                or ht > 110 or (t.get('amenity') == 'place_of_worship' and area > 400)) else 0
+        flags = shop | (2 if roof == 'dome' or (t.get('building') == 'stadium' and area > 15000) else 0) | (4 if roof in ('gabled', 'hipped', 'pyramidal') else 0) | (8 * landmark)
+        ni = sidx(nm) if nm and len(names) < 65000 else 0
+        bl.append((ring, k, ht, ni | (mat << 16) | (flags << 24), col))
     print(f'[{key}] buildings kept {len(bl)}', flush=True)
 
     # ---------- landcover raster
@@ -287,7 +361,7 @@ def build(key, osmdir):
         for e in edges:
             if e[3] & 2: continue
             for q in [nodes[e[0]][:2]] + e[7]: land_pts.append(pix(*q))
-        for ring, _, _ in bl[::3]: land_pts.append(pix(*ring[0]))
+        for ring, *_ in bl[::3]: land_pts.append(pix(*ring[0]))
         vote(land_pts, 1, 3)
         water_lab = np.where(votes[:, 0] > votes[:, 1])[0]
         water_lab = water_lab[water_lab > 0]
@@ -317,33 +391,51 @@ def build(key, osmdir):
             if len(r) >= 3: md.polygon([((x - gx0) / MRES, (z - gz0) / MRES) for x, z in r], fill=munis.index(name))
     muni = np.array(mimg, dtype=np.uint8)
 
-    # ---------- elevated rail: chain bridge segments into runs
-    runs = [[(x, z) for x, z, _ in p] for p in h.rail]
-    merged = True
-    while merged:
-        merged = False
-        ends = {}
-        for i, r in enumerate(runs):
-            ends.setdefault((round(r[0][0], 1), round(r[0][1], 1)), []).append((i, 0))
-            ends.setdefault((round(r[-1][0], 1), round(r[-1][1], 1)), []).append((i, 1))
-        used = set()
-        out = []
-        for i, r in enumerate(runs):
-            if i in used: continue
-            used.add(i); cur = list(r)
-            grew = True
-            while grew:
-                grew = False
-                for end in (1, 0):
-                    k = (round(cur[-1][0], 1), round(cur[-1][1], 1)) if end else (round(cur[0][0], 1), round(cur[0][1], 1))
-                    for j, je in ends.get(k, []):
-                        if j in used: continue
-                        o = runs[j] if (je == 0) == bool(end) else runs[j][::-1]
-                        cur = cur + o[1:] if end else o[:-1] + cur
-                        used.add(j); grew = merged = True; break
-            out.append(cur)
-        runs = out
-    runs = [dp(r, 0.6) for r in runs if len(r) >= 2]
+    # ---------- chain track pieces that share endpoints into long runs
+    def chain(lines):
+        runs = [list(r) for r in lines if len(r) >= 2]
+        merged = True
+        while merged:
+            merged = False
+            ends = {}
+            for i, r in enumerate(runs):
+                ends.setdefault((round(r[0][0], 1), round(r[0][1], 1)), []).append((i, 0))
+                ends.setdefault((round(r[-1][0], 1), round(r[-1][1], 1)), []).append((i, 1))
+            used = set()
+            out = []
+            for i, r in enumerate(runs):
+                if i in used: continue
+                used.add(i); cur = list(r)
+                grew = True
+                while grew:
+                    grew = False
+                    for end in (1, 0):
+                        k = (round(cur[-1][0], 1), round(cur[-1][1], 1)) if end else (round(cur[0][0], 1), round(cur[0][1], 1))
+                        for j, je in ends.get(k, []):
+                            if j in used: continue
+                            o = runs[j] if (je == 0) == bool(end) else runs[j][::-1]
+                            cur = cur + o[1:] if end else o[:-1] + cur
+                            used.add(j); grew = merged = True; break
+                out.append(cur)
+            runs = out
+        return runs
+    # heavy-rail viaducts (visual only)
+    runs = [dp(r, 0.6) for r in chain([[(x, z) for x, z, _ in p] for p in h.rail])]
+    # rapid transit lines: every point carries 0 ground / 1 elevated / 2 underground
+    transit = chain([[(x, z, f) for x, z in dp(p, 0.6)] for f, _, p in h.transit])
+    transit = [r for r in transit if sum(math.hypot(r[i][0] - r[i - 1][0], r[i][1] - r[i - 1][1]) for i in range(1, len(r))) > 400]
+    seen = {}
+    for nm, x, z in h.stations:
+        if not inbox(x, z, 0): continue
+        if any(math.hypot(x - a, z - b) < 400 for a, b in seen.get(nm, [])): continue
+        seen.setdefault(nm, []).append((x, z))
+    stations = [[nm, x, z] for nm, pts_ in seen.items() for x, z in pts_]
+    pseen = {}
+    for nm, kind, x, z in h.pois:
+        if not inbox(x, z, 0) or nm in pseen: continue
+        pseen[nm] = [nm, kind, x, z]
+    pois = list(pseen.values())
+    print(f'[{key}] transit runs {len(transit)} stations {len(stations)} pois {len(pois)} bus stops {len(h.stops)}', flush=True)
 
     # ---------- spawn
     sx, sz = proj(cfg['spawn'][1], cfg['spawn'][0])
@@ -372,7 +464,7 @@ def build(key, osmdir):
     add('edges', np.array(eInfo, dtype=np.int32).reshape(-1))
     add('ePts', np.array(ePts, dtype=np.int16))
     bInfo, bPts = [], []
-    for ring, k, ht in bl:
+    for ring, k, ht, extra, col in bl:
         start = len(bPts) // 2
         x0, z0 = q(ring[0][0]), q(ring[0][1]); px, pz = x0, z0
         ok = True; tmp = []
@@ -382,7 +474,7 @@ def build(key, osmdir):
             tmp += [dx, dz]; px, pz = q(x), q(z)
         if not ok: continue
         bPts += tmp
-        bInfo += [x0, z0, start, len(ring) - 1, int(round(ht * 4)) | (k << 16)]
+        bInfo += [x0, z0, start, len(ring) - 1, int(round(ht * 4)) | (k << 16), extra, col]
     add('buildings', np.array(bInfo, dtype=np.int32))
     add('bPts', np.array(bPts, dtype=np.int16))
     tr = sorted(h.trees)
@@ -392,11 +484,17 @@ def build(key, osmdir):
         rInfo += [len(rPts) // 2, len(r)]
         for x, z in r: rPts += [q(x), q(z)]
     add('rail', np.array(rInfo, dtype=np.int32)); add('rPts', np.array(rPts, dtype=np.int32))
+    tInfo, tPts, tFlag = [], [], []
+    for r in transit:
+        tInfo += [len(tPts) // 2, len(r)]
+        for x, z, f in r: tPts += [q(x), q(z)]; tFlag.append(f)
+    add('transit', np.array(tInfo, dtype=np.int32)); add('tPts', np.array(tPts, dtype=np.int32)); add('tFlag', np.array(tFlag, dtype=np.uint8))
     add('land', rle)
     add('muni', muni.reshape(-1))
 
     meta = dict(key=key, bbox=[gx0, gz0, gx1, gz1], center=[clat, clon], res=RES, W=W, H=H, mres=MRES, MW=MW, MH=MH, unit=1 / U,
-                names=names, munis=munis, places=sorted(set(h.places)), spawn=[sx, sz], secs=secs)
+                names=names, munis=munis, places=sorted(set(h.places)), spawn=[sx, sz], secs=secs, version=2,
+                stations=stations, pois=pois, stops=[list(s) for s in h.stops])
     gz_ = gzip.compress(bytes(blob), 9)
     b64 = base64.b64encode(gz_).decode('ascii')
     outdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'wheelie-city', 'maps')
@@ -405,7 +503,7 @@ def build(key, osmdir):
         f.write('/* Map data (c) OpenStreetMap contributors, ODbL 1.0. https://www.openstreetmap.org/copyright */\n')
         f.write(f'WC_MAP({json.dumps(key)},{json.dumps(meta, separators=(",", ":"), ensure_ascii=False)},"{b64}");\n')
     print(f'[{key}] raw {len(blob) / 1e6:.1f} MB, gzip {len(gz_) / 1e6:.1f} MB, file {len(b64) / 1e6:.1f} MB '
-          f'(nodes {len(nodes)}, edges {len(edges)}, buildings {len(bInfo) // 5}, trees {len(tr)}, rail runs {len(runs)}, land rle {rle.size // 2})', flush=True)
+          f'(nodes {len(nodes)}, edges {len(edges)}, buildings {len(bInfo) // 7}, trees {len(tr)}, rail runs {len(runs)}, land rle {rle.size // 2})', flush=True)
 
 
 if __name__ == '__main__':

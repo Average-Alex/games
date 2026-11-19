@@ -11,9 +11,20 @@ const CAR_TYPES = {
   van:    { L: 5.2, W: 2.0, wb: 3.2, r: 0.36, body: [[-2.6, 0.38], [2.6, 0.38], [2.62, 0.9], [2.3, 1.25], [1.6, 1.4], [-2.6, 1.42], [-2.62, 0.9]], cabin: [[1.55, 1.38], [1.0, 2.08], [-2.55, 2.12], [-2.6, 1.4]], roof: [-2.5, 0.95, 2.12] },
 };
 const geoCache = {};
+// Round every corner of a profile with a small arc so bodies read as pressed metal, not boxes
+function roundProfile(pts, r) {
+  const out = [], n = pts.length;
+  for (let i = 0; i < n; i++) {
+    const p = pts[i], a = pts[(i + n - 1) % n], b = pts[(i + 1) % n];
+    const la = Math.hypot(a[0] - p[0], a[1] - p[1]), lb = Math.hypot(b[0] - p[0], b[1] - p[1]), rr = Math.min(r, la * 0.4, lb * 0.4);
+    const pa = [p[0] + (a[0] - p[0]) / la * rr, p[1] + (a[1] - p[1]) / la * rr], pb = [p[0] + (b[0] - p[0]) / lb * rr, p[1] + (b[1] - p[1]) / lb * rr];
+    for (let k = 0; k <= 3; k++) { const t = k / 3, u = 1 - t; out.push([u * u * pa[0] + 2 * u * t * p[0] + t * t * pb[0], u * u * pa[1] + 2 * u * t * p[1] + t * t * pb[1]]); }
+  }
+  return out;
+}
 function extrudeProfile(pts, width, bevel) {
-  const sh = new THREE.Shape(pts.map(([z, y]) => new THREE.Vector2(z, y)));
-  const g = new THREE.ExtrudeGeometry(sh, { depth: width - bevel * 2, bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 1, curveSegments: 1 });
+  const sh = new THREE.Shape(roundProfile(pts, bevel > 0.04 ? 0.16 : 0.1).map(([z, y]) => new THREE.Vector2(z, y)));
+  const g = new THREE.ExtrudeGeometry(sh, { depth: width - bevel * 2, bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 3, curveSegments: 1 });
   g.rotateY(-Math.PI / 2); g.translate(width / 2 - bevel, 0, 0);
   g.computeVertexNormals();
   return g;
@@ -21,7 +32,7 @@ function extrudeProfile(pts, width, bevel) {
 function carGeo(type) {
   if (geoCache[type]) return geoCache[type];
   const T = CAR_TYPES[type], hw = T.W / 2;
-  const body = extrudeProfile(T.body, T.W, 0.05);
+  const body = extrudeProfile(T.body, T.W, 0.08);
   const glass = extrudeProfile(T.cabin, T.W - 0.18, 0.03);
   const roof = new THREE.BoxGeometry(T.W - 0.2, 0.05, T.roof[1] - T.roof[0]); roof.translate(0, T.roof[2] + 0.02, (T.roof[0] + T.roof[1]) / 2);
   const wheels = []; for (const sx of [1, -1]) for (const sz of [1, -1]) { const w = new THREE.CylinderGeometry(T.r, T.r, 0.26, 14); w.rotateZ(Math.PI / 2); w.translate(sx * (hw - 0.1), T.r, sz * T.wb / 2); wheels.push(w); }
@@ -30,10 +41,16 @@ function carGeo(type) {
   const head = []; for (const x of [hw - 0.35, -(hw - 0.35)]) { const b = new THREE.BoxGeometry(0.42, 0.13, 0.05); b.translate(x, fy, T.L / 2 + 0.02); head.push(b); }
   const tail = []; for (const x of [hw - 0.3, -(hw - 0.3)]) { const b = new THREE.BoxGeometry(0.38, 0.14, 0.05); b.translate(x, ry + 0.02, -T.L / 2 - 0.02); tail.push(b); }
   const bump = []; for (const s of [1, -1]) { const b = new THREE.BoxGeometry(T.W + 0.02, 0.18, 0.16); b.translate(0, T.r + 0.05, s * (T.L / 2 - 0.02)); bump.push(b); }
-  return (geoCache[type] = { body, glass, roof, wheels: merge(wheels), hubs: merge(hubs), head: merge(head), tail: merge(tail), bump: merge(bump), T });
+  // grille, mirrors, plates, tyre sidewall shading
+  const grille = new THREE.BoxGeometry(T.W * 0.55, 0.16, 0.04); grille.translate(0, fy - 0.12, T.L / 2 + 0.03); bump.push(grille);
+  const glassFrontZ = T.cabin[0][0];
+  for (const s of [1, -1]) { const mr = new THREE.BoxGeometry(0.2, 0.12, 0.08); mr.translate(s * (hw + 0.1), T.cabin[0][1] + 0.08, glassFrontZ - 0.15); bump.push(mr); }
+  const plates = []; for (const s of [1, -1]) { const p = new THREE.BoxGeometry(0.52, 0.12, 0.02); p.translate(0, T.r + 0.08, s * (T.L / 2 + 0.07)); plates.push(p); }
+  return (geoCache[type] = { body, glass, roof, wheels: merge(wheels), hubs: merge(hubs), head: merge(head), tail: merge(tail), bump: merge(bump), plates: merge(plates), T });
 }
 const carMats = {
-  glass: M('#1b2028', 0.12, 0.6), tire: new THREE.MeshLambertMaterial({ color: '#141414' }), hub: M('#9aa0a6', 0.35, 0.8), bump: new THREE.MeshLambertMaterial({ color: '#1c1d20' }),
+  plate: new THREE.MeshLambertMaterial({ color: '#e8e8e2' }),
+  glass: M('#1b2028', 0.06, 0.9), tire: new THREE.MeshLambertMaterial({ color: '#141414' }), hub: M('#9aa0a6', 0.35, 0.8), bump: new THREE.MeshLambertMaterial({ color: '#1c1d20' }),
   head: new THREE.MeshBasicMaterial({ color: '#fff4d6' }), tail: new THREE.MeshBasicMaterial({ color: '#ff2a2a' }), taxi: new THREE.MeshBasicMaterial({ color: '#fff7c2' }),
   red: new THREE.MeshBasicMaterial({ color: '#ff2236' }), blue: new THREE.MeshBasicMaterial({ color: '#2b6bff' }), off: new THREE.MeshLambertMaterial({ color: '#3a3a40' }),
   uniform: M('#1d2a44', 0.8), helmet: M('#f4f4f2', 0.3), copBlack: M('#141518', 0.4, 0.4),
@@ -43,7 +60,7 @@ function buildCarModel(type, paint, extra = {}) {
   g.add(body);
   const add = (geo, mat, cast) => { const me = new THREE.Mesh(geo, mat); if (cast) me.castShadow = true; body.add(me); return me; };
   add(G_.body, paint, true); add(G_.glass, carMats.glass); add(G_.roof, paint); add(G_.wheels, carMats.tire); add(G_.hubs, carMats.hub); add(G_.bump, carMats.bump);
-  add(G_.head, carMats.head); add(G_.tail, carMats.tail);
+  add(G_.head, carMats.head); add(G_.tail, carMats.tail); add(G_.plates, carMats.plate);
   const out = { g, body, T };
   if (extra.taxi) { const s = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.22, 0.28), carMats.taxi); s.position.set(0, T.roof[2] + 0.16, (T.roof[0] + T.roof[1]) / 2); body.add(s); }
   if (extra.cop) {
