@@ -320,6 +320,80 @@ function bmLayer() {
   }
   return NAV.layer;
 }
+// Landmarks marked on the city map: the places people know each area by. [name, kind, lat, lon]
+const LANDMARKS = {
+  van: [
+    ['BC Place', 'stadium', 49.2768, -123.1119], ['Rogers Arena', 'stadium', 49.2778, -123.1089], ['Canada Place', 'landmark', 49.2888, -123.1111],
+    ['Stanley Park', 'park', 49.3017, -123.1417], ['Gastown Steam Clock', 'landmark', 49.2844, -123.1089], ['Chinatown', 'area', 49.2797, -123.1003],
+    ['Granville Island', 'area', 49.2712, -123.1340], ['Science World', 'landmark', 49.2734, -123.1038], ['English Bay', 'beach', 49.2863, -123.1430],
+    ['Kitsilano Beach', 'beach', 49.2737, -123.1550], ['Commercial Drive', 'area', 49.2700, -123.0695], ['Queen Elizabeth Park', 'park', 49.2418, -123.1126],
+    ['UBC', 'campus', 49.2606, -123.2460], ['PNE & Playland', 'landmark', 49.2823, -123.0405], ['Metrotown', 'mall', 49.2265, -123.0005],
+    ['Brentwood', 'mall', 49.2665, -123.0013], ['YVR Airport', 'airport', 49.1947, -123.1792], ['Richmond Centre', 'mall', 49.1680, -123.1365],
+  ],
+  la: [
+    ['Hollywood Walk of Fame', 'landmark', 34.1016, -118.3387], ['TCL Chinese Theatre', 'landmark', 34.1022, -118.3409], ['Griffith Observatory', 'landmark', 34.1184, -118.3004],
+    ['Little Tokyo', 'area', 34.0500, -118.2400], ['Chinatown', 'area', 34.0623, -118.2383], ['Union Station', 'landmark', 34.0562, -118.2365],
+    ['Crypto.com Arena', 'stadium', 34.0430, -118.2673], ['Dodger Stadium', 'stadium', 34.0739, -118.2400], ['Walt Disney Concert Hall', 'landmark', 34.0553, -118.2498],
+    ['Koreatown', 'area', 34.0618, -118.3005], ['The Grove', 'mall', 34.0721, -118.3577], ['LACMA', 'landmark', 34.0639, -118.3592],
+    ['Rodeo Drive', 'area', 34.0696, -118.4053], ['UCLA', 'campus', 34.0689, -118.4452], ['LA Coliseum', 'stadium', 34.0141, -118.2879],
+    ['Venice Beach', 'beach', 33.9850, -118.4695],
+  ],
+  vegas: [
+    ['The Strip', 'area', 36.1147, -115.1728], ['Bellagio Fountains', 'landmark', 36.1126, -115.1767], ['Caesars Palace', 'landmark', 36.1162, -115.1745],
+    ['The Venetian', 'landmark', 36.1212, -115.1697], ['Sphere', 'landmark', 36.1207, -115.1622], ['High Roller', 'landmark', 36.1176, -115.1683],
+    ['MGM Grand', 'landmark', 36.1024, -115.1695], ['Luxor', 'landmark', 36.0955, -115.1761], ['T-Mobile Arena', 'stadium', 36.1029, -115.1784],
+    ['Allegiant Stadium', 'stadium', 36.0909, -115.1833], ['Welcome to Las Vegas sign', 'landmark', 36.0820, -115.1728], ['The STRAT', 'landmark', 36.1475, -115.1566],
+    ['Fremont Street', 'area', 36.1707, -115.1430], ['Arts District', 'area', 36.1590, -115.1530], ['Harry Reid Airport', 'airport', 36.0840, -115.1537],
+  ],
+  miami: [
+    ['South Beach', 'beach', 25.7810, -80.1310], ['Ocean Drive', 'area', 25.7790, -80.1310], ['Lincoln Road', 'area', 25.7907, -80.1395],
+    ['Wynwood Walls', 'landmark', 25.8010, -80.1994], ['Design District', 'area', 25.8130, -80.1930], ['Kaseya Center', 'stadium', 25.7814, -80.1870],
+    ['Bayside Marketplace', 'mall', 25.7784, -80.1867], ['Pérez Art Museum', 'landmark', 25.7859, -80.1866], ['Brickell', 'area', 25.7617, -80.1918],
+    ['Little Havana', 'area', 25.7656, -80.2193], ['loanDepot park', 'stadium', 25.7781, -80.2197], ['Vizcaya', 'landmark', 25.7443, -80.2105],
+    ['Coconut Grove', 'area', 25.7280, -80.2420],
+  ],
+  nyc: [
+    ['Times Square', 'area', 40.7580, -73.9855], ['Empire State Building', 'landmark', 40.7484, -73.9857], ['Central Park', 'park', 40.7812, -73.9665],
+    ['Rockefeller Center', 'landmark', 40.7587, -73.9787], ['Grand Central', 'landmark', 40.7527, -73.9772], ['Madison Square Garden', 'stadium', 40.7505, -73.9934],
+    ['High Line', 'park', 40.7480, -74.0048], ['One World Trade', 'landmark', 40.7127, -74.0134], ['Wall Street', 'area', 40.7060, -74.0088],
+    ['Brooklyn Bridge', 'landmark', 40.7061, -73.9969], ['Chinatown', 'area', 40.7158, -73.9970], ['Statue of Liberty', 'landmark', 40.6892, -74.0445],
+    ['Williamsburg', 'area', 40.7081, -73.9571], ['Barclays Center', 'stadium', 40.6826, -73.9754], ['Yankee Stadium', 'stadium', 40.8296, -73.9262],
+  ],
+};
+const LM_COL = { stadium: '#ff9f1a', landmark: '#ffd23a', park: '#3ccf6e', beach: '#4fd2e8', area: '#ff5ca8', mall: '#b58cff', campus: '#8fb3ff', airport: '#d8d4ca' };
+const LM_ICON = { stadium: '◉', landmark: '★', park: '♣', beach: '≈', area: '◆', mall: '▣', campus: '▲', airport: '✈' };
+// Game position of a lat / lon (same projection as the map builder: metres from the box centre, x grows west)
+function latLonToWorld(lat, lon) {
+  const [clat, clon] = MAP.meta.center;
+  return [-(lon - clon) * 111320 * Math.cos(clat * Math.PI / 180), (lat - clat) * 110540];
+}
+function cityLandmarks() {
+  if (!MAP) return [];
+  if (MAP._lm) return MAP._lm;
+  return (MAP._lm = (LANDMARKS[MAP.key] || []).map(([name, kind, lat, lon]) => { const [x, z] = latLonToWorld(lat, lon); return { name, kind, x, z }; })
+    .filter((l) => l.x >= MAP.gx0 && l.x <= MAP.gx1 && l.z >= MAP.gz0 && l.z <= MAP.gz1));
+}
+function drawLandmarks(g) {
+  const placed = [];
+  g.textBaseline = 'middle';
+  for (const l of cityLandmarks()) {
+    const [x, y] = bmToScreen(l.x, l.z);
+    if (x < -40 || y < -40 || x > BW + 40 || y > BH + 40) continue;
+    const col = LM_COL[l.kind] || '#ffd23a';
+    // pin: coloured disc with the kind's symbol
+    g.fillStyle = 'rgba(12,13,19,.85)'; g.beginPath(); g.arc(x, y, 11, 0, TAU); g.fill();
+    g.fillStyle = col; g.beginPath(); g.arc(x, y, 9, 0, TAU); g.fill();
+    g.fillStyle = '#0c0d13'; g.font = '800 11px "Archivo", sans-serif'; g.textAlign = 'center'; g.fillText(LM_ICON[l.kind] || '★', x, y + 0.5);
+    // name beside it, unless it would sit on top of one already drawn
+    g.font = '800 13px "Archivo", sans-serif'; g.textAlign = 'left';
+    const w = g.measureText(l.name).width, box = [x + 14, y - 9, x + 18 + w, y + 9];
+    if (placed.some((p) => box[0] < p[2] && box[2] > p[0] && box[1] < p[3] && box[3] > p[1])) continue;
+    placed.push(box);
+    g.strokeStyle = 'rgba(12,13,19,.92)'; g.lineWidth = 4; g.strokeText(l.name, x + 15, y);
+    g.fillStyle = col; g.fillText(l.name, x + 15, y);
+  }
+  g.textBaseline = 'alphabetic';
+}
 function drawBigMap() {
   if (!cityMapCv || !NAV.view) return;
   const g = bmCtx, v = NAV.view, m = MAP;
@@ -350,6 +424,7 @@ function drawBigMap() {
     g.fillStyle = '#fff'; g.strokeStyle = '#2b6bff';
     for (const ln of MAP.lines) for (const st of ln.stations) { const [x, y] = bmToScreen(st.x, st.z); g.beginPath(); g.arc(x, y, 3.5, 0, TAU); g.fill(); g.stroke(); }
   }
+  drawLandmarks(g);
   const fl = Math.floor(performance.now() / 250) % 2;
   for (const u of units) if (u.on && u.kind !== 'car') { const [px, py] = bmToScreen(u.x, u.z); g.fillStyle = fl ? '#ff2236' : '#2b6bff'; g.beginPath(); g.arc(px, py, 4, 0, TAU); g.fill(); }
   const [px, py] = bmToScreen(S.x, S.z);
@@ -422,6 +497,7 @@ function buildNavIndex() {
   for (const [v, a] of acc) if (a[2] > 60) add(m.munis[v], 'city', m.gx0 + (a[0] / a[2] + 0.5) * m.mres, m.gz0 + (a[1] / a[2] + 0.5) * m.mres);
   for (const p of m.towns) add(p[0], 'city', p[2], p[3]);
   for (const p of m.places) add(p[0], p[1], p[2], p[3]);
+  for (const l of cityLandmarks()) add(l.name, l.kind === 'area' ? 'neighbourhood' : l.kind === 'campus' ? 'university' : l.kind === 'beach' || l.kind === 'airport' ? 'landmark' : l.kind, l.x, l.z);
   for (const ln of m.lines) for (const st of ln.stations) add(st.name, 'station', st.x, st.z);
   for (const [nm, kind, x, z] of m.pois) add(nm, kind, x, z);
   for (let b = 0; b < m.B; b++) if (m.bName[b]) { const bb = b * 4; add(m.names[m.bName[b]], 'building', (m.bBox[bb] + m.bBox[bb + 2]) / 2, (m.bBox[bb + 1] + m.bBox[bb + 3]) / 2); }

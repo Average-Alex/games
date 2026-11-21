@@ -62,6 +62,8 @@
   #wheelie .w-pts { font-family: var(--digits); font-weight: 700; font-size: 22px; color: var(--pink); font-variant-numeric: tabular-nums; }
   #wheelie .w-tag { font-size: 14px; font-weight: 800; font-stretch: 75%; letter-spacing: .2em; text-transform: uppercase; color: var(--teal); }
   #gauge { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); width: 220px; max-width: 32cqw; }
+  /* on foot in a station, or on the train: no bike gauges */
+  #hud.transit #gauge, #hud.transit #keyhint, #hud.transit #hint { display: none; }
   #gauge svg { display: block; width: 100%; height: auto; }
   #feed { position: absolute; top: 29%; left: 50%; transform: translateX(-50%); display: grid; justify-items: center; gap: 2px; }
   .pop { font-size: 24px; font-weight: 900; font-style: italic; font-stretch: 80%; letter-spacing: .02em; text-transform: uppercase; animation: pop 1.8s ease-out forwards; white-space: nowrap; text-shadow: 0 2px 12px rgba(0, 0, 0, .7); }
@@ -244,7 +246,8 @@
           <h3>Bike</h3>
           <div class="seg" role="group" aria-label="Bike type">
             <button type="button" id="tabE" aria-pressed="true">Electric</button>
-            <button type="button" id="tabG" aria-pressed="false">Gas</button>
+            <button type="button" id="tabG" aria-pressed="false">Dirt &amp; moto</button>
+            <button type="button" id="tabS" aria-pressed="false">Street</button>
           </div>
         </div>
         <div class="cards" id="bikeCards"></div>
@@ -298,6 +301,7 @@
       </div>
       <p class="note">Every street, highway, bridge, building and park comes from OpenStreetMap, so you can ride the real city and take the highway to the next one. Wheelies, tricks, near misses, red lights and sidewalk riding raise your wanted level when a cop sees it. Lose them for a bonus. Get boxed in while slow and you're busted. Bike stats are approximate.</p>
       <p class="note">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>, ODbL.</p>
+      <p class="note">Building heights: <a href="https://overturemaps.org" target="_blank" rel="noopener">Overture Maps Foundation</a> (ODbL / CDLA). Textures and skies: <a href="https://polyhaven.com" target="_blank" rel="noopener">Poly Haven</a> and <a href="https://ambientcg.com" target="_blank" rel="noopener">ambientCG</a> (CC0). Terrain: AWS Terrain Tiles (Mapzen; SRTM, USGS, NRCan). Imagery: USGS The National Map (public domain); Vancouver: <a href="https://s2maps.eu" target="_blank" rel="noopener">Sentinel-2 cloudless 2024 by EOX IT Services GmbH</a> (CC BY-NC-SA 4.0, contains modified Copernicus Sentinel data 2024).</p>
       <p class="note warn" id="lockNote" hidden></p>
     </div>
   </section>
@@ -345,11 +349,14 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
 <script src="wheelie-city/core.js"></script>
 <script src="wheelie-city/map.js"></script>
+<script src="wheelie-city/world.js"></script>
+<script src="wheelie-city/landmarks.js"></script>
 <script src="wheelie-city/vehicles.js"></script>
 <script src="wheelie-city/bike.js"></script>
 <script src="wheelie-city/audio.js"></script>
 <script src="wheelie-city/nav.js"></script>
 <script src="wheelie-city/life.js"></script>
+<script src="wheelie-city/transit.js"></script>
 <script src="wheelie-city/play.js"></script>
 </body>
 </html>

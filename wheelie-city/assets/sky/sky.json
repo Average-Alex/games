@@ -1,0 +1,114 @@
+{
+ "clear_van": {
+  "sun": [
+   0.5523,
+   0.7451,
+   0.374
+  ],
+  "peak": 38.0,
+  "src": "kloofendal_48d_partly_cloudy_puresky",
+  "horizon": [
+   0.7582,
+   0.7936,
+   0.8518
+  ]
+ },
+ "cloudy": {
+  "sun": [
+   0.8046,
+   0.3883,
+   0.4493
+  ],
+  "peak": 5.0,
+  "src": "kloofendal_overcast_puresky",
+  "horizon": [
+   0.7124,
+   0.7281,
+   0.7573
+  ]
+ },
+ "storm": {
+  "sun": [
+   0.8043,
+   0.5708,
+   -0.1651
+  ],
+  "peak": 2.1,
+  "src": "overcast_soil_puresky",
+  "horizon": [
+   0.5918,
+   0.586,
+   0.58
+  ]
+ },
+ "mist": {
+  "sun": [
+   0.5305,
+   0.694,
+   0.4868
+  ],
+  "peak": 1.5,
+  "src": "kloofendal_misty_morning_puresky",
+  "horizon": [
+   0.7138,
+   0.7145,
+   0.7285
+  ]
+ },
+ "sunset_la": {
+  "sun": [
+   0.8025,
+   0.1041,
+   0.5875
+  ],
+  "peak": 21.4,
+  "src": "qwantani_sunset_puresky",
+  "horizon": [
+   0.9111,
+   0.9174,
+   0.9144
+  ]
+ },
+ "night_vegas": {
+  "sun": [
+   -0.0209,
+   0.9946,
+   0.102
+  ],
+  "peak": 35.0,
+  "src": "qwantani_night_puresky",
+  "horizon": [
+   0.8362,
+   0.8284,
+   0.8101
+  ]
+ },
+ "clear_miami": {
+  "sun": [
+   0.6319,
+   0.2251,
+   0.7417
+  ],
+  "peak": 35.3,
+  "src": "table_mountain_1_puresky",
+  "horizon": [
+   0.8774,
+   0.9095,
+   0.9374
+  ]
+ },
+ "dusk_nyc": {
+  "sun": [
+   0.8222,
+   0.2131,
+   0.5278
+  ],
+  "peak": 6.7,
+  "src": "qwantani_dusk_2_puresky",
+  "horizon": [
+   0.8128,
+   0.7791,
+   0.8278
+  ]
+ }
+}

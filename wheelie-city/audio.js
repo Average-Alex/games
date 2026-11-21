@@ -304,6 +304,10 @@ const sfx = (() => {
       o.frequency.setValueAtTime(500, t); o.frequency.exponentialRampToValueAtTime(1400, t + 0.25); o.frequency.exponentialRampToValueAtTime(600, t + 0.5);
       const bp = filt('bandpass', 1500, 0.8); o.connect(bp); const g = env(bp, 0.25, 0.02, 0.5); g.connect(p); o.start(t); o.stop(t + 0.6);
     },
+    // fare gate accepting your card
+    beep() { if (!can()) return; const t = ctx.currentTime; tone('sine', 1760, null, 0.16, 0.004, 0.09, null, t); tone('sine', 2350, null, 0.12, 0.004, 0.12, null, t + 0.1); },
+    // doors-opening chime: three falling notes
+    chime() { if (!can()) return; const t = ctx.currentTime; [[988, 0], [784, 0.28], [659, 0.56]].forEach(([f, dt]) => tone('sine', f, null, 0.13, 0.01, 0.55, null, t + dt)); },
     setMuted(m) { if (master) master.gain.setTargetAtTime(m ? 0 : 0.7, ctx.currentTime, 0.05); },
     get ready() { return ready; },
   };

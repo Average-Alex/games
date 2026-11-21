@@ -2,7 +2,8 @@
 'use strict';
 
 // ---------------------------------------------------------------- menu UI
-let bikeTab = BIKES[bikeKey].type === 'gas' ? 'gas' : 'e';
+const bikeCat = (bk) => bk.type !== 'gas' ? 'e' : bk.street ? 'street' : 'gas';
+let bikeTab = bikeCat(BIKES[bikeKey]);
 function buildCards() {
   const cc = $('#cityCards'); cc.innerHTML = '';
   for (const [k, c] of Object.entries(CITIES)) {
@@ -15,8 +16,9 @@ function buildCards() {
   const bc = $('#bikeCards'); bc.innerHTML = '';
   $('#tabE').setAttribute('aria-pressed', String(bikeTab === 'e'));
   $('#tabG').setAttribute('aria-pressed', String(bikeTab === 'gas'));
+  $('#tabS').setAttribute('aria-pressed', String(bikeTab === 'street'));
   for (const [k, bk] of Object.entries(BIKES)) {
-    if ((bk.type === 'gas') !== (bikeTab === 'gas')) continue;
+    if (bikeCat(bk) !== bikeTab) continue;
     const b = document.createElement('button');
     b.type = 'button'; b.className = 'card'; b.setAttribute('aria-pressed', String(k === bikeKey));
     const bar = (lbl, v) => `<div class="stat">${lbl}<span><i style="width:${Math.round(v * 100)}%"></i></span></div>`;
@@ -47,6 +49,7 @@ function buildRiderOpts() {
 buildRiderOpts();
 $('#tabE').addEventListener('click', () => { bikeTab = 'e'; buildCards(); });
 $('#tabG').addEventListener('click', () => { bikeTab = 'gas'; buildCards(); });
+$('#tabS').addEventListener('click', () => { bikeTab = 'street'; buildCards(); });
 const povSel = $('#povSel');
 for (const [k, label] of POVS) { const o = document.createElement('option'); o.value = k; o.textContent = label; povSel.appendChild(o); }
 function setPov(p) {
@@ -58,7 +61,7 @@ povSel.addEventListener('change', () => setPov(povSel.value));
 $('#sens').value = sens;
 $('#sens').addEventListener('input', (e) => { sens = parseFloat(e.target.value); store.set('wc-sens', sens); });
 const qualSel = $('#quality'); qualSel.value = quality;
-qualSel.addEventListener('change', () => { quality = qualSel.value; store.set('wc-quality2', quality); applyQuality(); setupSky(); if (MAP) { clearTiles(); setupMapMaterials(); applyWeather(0, true); updateTiles(S.x, S.z, true); } });
+qualSel.addEventListener('change', () => { quality = qualSel.value; store.set('wc-quality2', quality); applyQuality(); setupSky(); if (MAP) { clearTiles(); setupMapMaterials(); setupWorld(); applyWeather(0, true); updateTiles(S.x, S.z, true); } });
 const wxSel = $('#weatherSel'); wxSel.value = WX.mode;
 wxSel.addEventListener('change', () => { WX.mode = wxSel.value; store.set('wc-weather', WX.mode); if (WX.mode !== 'auto') { WX.from = WX.to = WX.mode; WX.t = 1; WX.wet = WX.mode === 'rain' ? 1 : 0; applyWeather(0, true); } });
 const respSel = $('#respawnMode'); respSel.value = store.get('wc-respawn', 'crash');
@@ -83,7 +86,8 @@ async function loadCity(key) {
   for (const u of units) deactivate(u);
   if (MAP && MAP.key !== key) MAP = null;
   try {
-    const m = await loadMap(key, mapStatus);
+    // streets, photo textures, skies and the terrain round the city all load together
+    const [m] = await Promise.all([loadMap(key, mapStatus), loadTextures(), loadSkies(key), loadTerrain(key)]);
     if (loadingKey !== key) return;
     C = CITIES[key];
     setupCity();
@@ -97,11 +101,12 @@ async function loadCity(key) {
 function setupCity() {
   setupSky();
   setupMapMaterials();
+  setupWorld();
   applyWeather(0, true);
   buildUnitPools();
   buildPeds();
   buildTrains();
-  RIDE.on = false; RIDE.train = null;
+  endTransit();
   cityMapCv = null;
   resetWorld();
 }
@@ -141,7 +146,7 @@ function resetRider(x, z, psi, v) {
   });
   W = { active: false };
   if (rig) rig.root.visible = true;
-  if (typeof RIDE !== 'undefined' && RIDE.train) { RIDE.train.mine = false; RIDE.on = false; RIDE.train = null; }
+  endTransit();
 }
 // Put the rider on the nearest road, in a lane, at a spot that is clear of trees, poles and walls for 12 m ahead
 function placeOnRoad(x, z, heading, v, allowHwy) {
@@ -221,7 +226,8 @@ addEventListener('keydown', (e) => {
     return;
   }
   keys.add(e.code);
-  if (e.code === 'KeyV' && state === 'play') { const i = POVS.findIndex((p) => p[0] === pov); setPov(POVS[(i + 1) % POVS.length][0]); popup(POVS[(i + 1) % POVS.length][1]); }
+  if (e.code === 'KeyV' && state === 'play' && (WALK.on || (S.riding && RIDE.train))) { transitKey('KeyV'); }
+  else if (e.code === 'KeyV' && state === 'play') { const i = POVS.findIndex((p) => p[0] === pov); setPov(POVS[(i + 1) % POVS.length][0]); popup(POVS[(i + 1) % POVS.length][1]); }
   if (state === 'play') {
     if (e.code === 'Space' && !S.crashed && S.theta < 0.45 && S.popCd <= 0 && S.v > 1.5) {
       const B = BIKES[bikeKey];
@@ -231,17 +237,8 @@ addEventListener('keydown', (e) => {
     }
     if (e.code === 'KeyR' && !S.crashed) { respawn(); popup('Reset'); }
     if (e.code === 'KeyM') toggleMute();
-    if (e.code === 'KeyE' || e.code === 'KeyF') {
-      const t = RIDE.train;
-      if (S.riding && t) {
-        if (e.code === 'KeyF') reverseTrain();
-        else if (canLeave(t)) leaveTrain(); else popup(t.atSt ? 'Departing…' : 'Wait for the next stop');
-      } else if (RIDE.near && !S.crashed) {
-        // E: towards the last station of the line (or the only way), F: towards the first
-        const ends = lineEnds(RIDE.near);
-        boardTrain(RIDE.near, e.code === 'KeyE' ? (ends.plus ? 1 : -1) : -1);
-      }
-    }
+    // E / F at a station walks you in; on the train E gets off, F rides back, V changes the view
+    if (e.code === 'KeyE' || e.code === 'KeyF') transitKey(e.code);
     if (e.code === 'KeyN') toggleMap();
     if (e.code === 'KeyP' || (e.code === 'Escape' && noLock)) pause();
   } else if (state === 'over' && e.code === 'Enter') begin(true);
@@ -250,6 +247,7 @@ addEventListener('keyup', (e) => keys.delete(e.code));
 addEventListener('blur', () => { keys.clear(); if (state === 'play') pause(); });
 document.addEventListener('mousemove', (e) => {
   if (state !== 'play' || mapOpen) return;
+  if (WALK.on || RIDE.on) { transitLook(e.movementX, e.movementY); return; }
   S.steerMouse = clamp(S.steerMouse + e.movementX * 0.003 * sens, -1, 1);
   S.leanIn = clamp(S.leanIn - e.movementY * 0.004 * sens, -1, 1);
 });
@@ -455,7 +453,8 @@ function step(d) {
       }
       if (u.kind === 'car') { offense(0.8); say(u, pick(Math.random, CURSES_HIT), false); sfx.horn(u); }
       else if (!u.chasing) addHeat(1);               // you rode into a patrol car
-      crash(u.kind === 'car' ? 'Hit a car' : u.chasing ? 'Rammed by the cops' : 'Hit a cop car', 'car', u, rel); return;
+      if (u.kind !== 'car' && PURSUIT.phase === 'pullover') { addHeat(Math.max(0.05, 2.05 - heat)); PURSUIT.phase = 'pursuit'; }
+      crash(u.kind === 'car' ? 'Hit a car' : u.chasing ? (u.tac === 'ram' && stars() >= 3 ? 'PIT maneuver by the cops' : 'Rammed by the cops') : 'Hit a cop car', 'car', u, rel); return;
     }
     u.bumpCd = (u.bumpCd || 0) - d;
     const dist = Math.hypot(dx, dz);
@@ -510,6 +509,7 @@ function endWheelie() {
 // ---------------------------------------------------------------- crashes: separate bike and rider bodies, debris, sparks
 function crash(reason, kind = 'wall', other = null, relSpeed) {
   if (S.crashed) return;
+  pedsReact(S.x, S.z);
   const B = BIKES[bikeKey], v = relSpeed ?? S.v, fx = Math.sin(S.psi), fz = Math.cos(S.psi), rx = -fz, rz = fx;
   const sev = clamp(v / 18, 0.25, 1.5), side = Math.random() < 0.5 ? -1 : 1;
   S.crashed = true; S.crashT = 0; S.crashReason = reason; S.cpsi = S.psi;
@@ -745,10 +745,55 @@ function addHeat(amount) {
   }
   chaseMax = Math.max(chaseMax, stars()); maxStarsRun = Math.max(maxStarsRun, stars());
 }
+// How a stop goes, like real traffic police: first they light you up and tell you to pull over. Stop and you get a
+// ticket. Keep going (or run for it) and it becomes a pursuit where they box you in; from 3 stars they ram and PIT you.
+const PURSUIT = { phase: 'none', t: 0, stopT: 0, sayCd: 0 };
+const MEGA_PULL = ['Pull over!', 'Rider, pull over to the right!', 'Stop the bike!', 'Pull over and stop your vehicle!', 'Pull it over, now.'];
+const MEGA_CHASE = ['STOP THE BIKE!', 'You’re not getting away!', 'Pull over NOW!', 'Last warning!', 'Suspect fleeing on a motorbike!', 'Give it up!'];
+const MEGA_RAM = ['Taking him out!', 'PIT, PIT, PIT!', 'Box him in!', 'Ram the bike!'];
+function leadCop() {
+  let best = null, bd = 1e9;
+  for (const u of units) if (u.on && u.kind !== 'car' && u.chasing) { const dd = Math.hypot(u.x - S.x, u.z - S.z); if (dd < bd) { bd = dd; best = u; } }
+  return best ? [best, bd] : [null, 1e9];
+}
+function pulledOver(cop) {
+  const fine = Math.min(banked, 250);
+  banked -= fine;
+  popup(`Pulled over · ticket${fine ? ` −${fine}` : ''}`, 'cop');
+  say(cop, pick(Math.random, ['Here’s your ticket. Ride safe.', 'Slow it down out there.', 'Licence and registration… OK, you’re free to go.']), false);
+  heat = 0; chaseMax = 0; PURSUIT.phase = 'none';
+  for (const u of units) if (u.on && u.kind !== 'car') { u.chasing = false; u.parkT = 5; }
+}
+function updatePursuit(d, st) {
+  if (st === 0) { PURSUIT.phase = 'none'; return; }
+  if (PURSUIT.phase === 'none') {
+    Object.assign(PURSUIT, { phase: st >= 2 ? 'pursuit' : 'pullover', t: 0, stopT: 0, sayCd: 0.5 });
+    popup(st >= 2 ? 'Police pursuit' : 'Cops are pulling you over · stop to take the ticket', 'cop');
+  }
+  PURSUIT.t += d; PURSUIT.sayCd -= d;
+  const [lead, dist] = leadCop();
+  if (PURSUIT.phase === 'pullover') {
+    if (st >= 2) { PURSUIT.phase = 'pursuit'; return; }
+    if (!lead) return;
+    if (dist < 120) heat = Math.max(heat, 1.05);         // it doesn't fade while they're right behind you
+    if (PURSUIT.sayCd <= 0 && dist < 70) { say(lead, pick(Math.random, MEGA_PULL), false); sfx.whoop(lead); PURSUIT.sayCd = 4.5; }
+    if (S.v < 1.5 && dist < 75 && !S.crashed && !S.riding) { PURSUIT.stopT += d; if (PURSUIT.stopT > 3) { pulledOver(lead); return; } }
+    else PURSUIT.stopT = Math.max(0, PURSUIT.stopT - d * 0.5);
+    // didn't stop: failure to stop, now it's a chase
+    if ((PURSUIT.t > 15 && dist < 90 && S.v > 4) || (PURSUIT.t > 5 && S.v > 22) || (PURSUIT.t > 3 && W.active && dist < 40)) {
+      addHeat(Math.max(0.05, 2.05 - heat)); PURSUIT.phase = 'pursuit';
+      popup('Failure to stop', 'cop'); say(lead, pick(Math.random, MEGA_CHASE), false); PURSUIT.sayCd = 3;
+    }
+  } else if (lead && PURSUIT.sayCd <= 0 && dist < 60) {
+    say(lead, pick(Math.random, st >= 3 && lead.tac === 'ram' ? MEGA_RAM : MEGA_CHASE), false); PURSUIT.sayCd = 5 + Math.random() * 3;
+  }
+}
 function updatePolice(d) {
   const st = stars();
+  updatePursuit(d, st);
   for (const u of units) if (u.on && u.kind !== 'car') {
-    if (st >= 1 && !u.chasing && Math.hypot(u.x - S.x, u.z - S.z) < 180) { u.chasing = true; u.next = null; }
+    if (u.parkT > 0) { u.parkT -= d; continue; }
+    if (st >= 1 && !u.chasing && Math.hypot(u.x - S.x, u.z - S.z) < 180) { u.chasing = true; u.next = null; u.tac = Math.random() < 0.6 ? 'ram' : 'box'; }
     if (st === 0) u.chasing = false;
   }
   const want = { cop: st >= 1 ? Math.min(5, st + 1) : 2, moto: Math.max(0, st - 2) };
@@ -801,13 +846,34 @@ function updateUnits(d) {
       driveGraph(u, d, Math.max(0, target));
     } else {
       u.freeCd = (u.freeCd || 0) - d;
-      const free = u.chasing && !S.crashed && dist < (u.kind === 'moto' ? 55 : 38) && u.freeCd <= 0;
+      // overshot you: pull a U-turn instead of driving off round the block
+      u.uturnCd = (u.uturnCd || 0) - d;
+      if (u.chasing && u.mode === 'graph' && !S.crashed && u.uturnCd <= 0 && dist < 260 && (S.x - u.x) * fx + (S.z - u.z) * fz < -10) {
+        u.dir = -u.dir; u.s = MAP.eLen[u.e] - u.s; u.next = null; u.yaw += Math.PI; u.v *= 0.25; u.uturnCd = 5;
+      }
+      const free = u.chasing && !S.crashed && dist < (u.kind === 'moto' ? 60 : 50) && u.freeCd <= 0;
       if (free && u.mode !== 'free') u.mode = 'free';
       if (!free && u.mode === 'free') { if (!snapToGraph(u)) { deactivate(u); continue; } }
       const top = Math.max((u.kind === 'moto' ? 24 : 21) + 0.8 * stars(), u.mode === 'graph' ? RC[MAP.eCls[u.e]].v * 1.35 : 0);
       // chasing cops close in and match your speed to box you in rather than ploughing into you;
       // patrols drive like traffic and brake for you
       let target = u.chasing ? (u.mode === 'free' ? Math.min(top, Math.max(0, S.v * 0.95 + (dist - 6) * 0.9)) : top) : graphTarget(u);
+      // where it steers in the open: behind you to pull you over, at your back wheel to ram, else just ahead of you
+      u.aimX = null;
+      if (u.chasing && u.mode === 'free') {
+        const bfx = Math.sin(S.psi), bfz = Math.cos(S.psi), [lead] = leadCop();
+        if (PURSUIT.phase === 'pullover') {
+          const back = u === lead ? 10 : 18;
+          u.aimX = S.x - bfx * back; u.aimZ = S.z - bfz * back;
+          target = Math.min(top, Math.max(0, S.v + (dist - back) * 0.8));
+        } else if (stars() >= 3 && u.tac === 'ram' && !S.crashed) {
+          // PIT: come up beside the back wheel and turn into it
+          const side = ((u.x - S.x) * bfz - (u.z - S.z) * bfx) >= 0 ? 1 : -1;
+          u.aimX = S.x - bfx * 0.8 + bfz * side * 0.9; u.aimZ = S.z - bfz * 0.8 - bfx * side * 0.9;
+          target = Math.min(top + 4, S.v + (dist < 25 ? 7 : 12));
+        }
+      }
+      if (u.parkT > 0) target = 0;
       if (!u.chasing) {
         const dx = S.x - u.x, dz = S.z - u.z, ahead = dx * fx + dz * fz, lat = Math.abs(-dx * fz + dz * fx);
         if (ahead > 1 && ahead < 14 && lat < 2.2) target = Math.min(target, Math.max(0, (ahead - 6) * 0.9));
@@ -815,7 +881,7 @@ function updateUnits(d) {
       if (u.hitT > 0) u.v *= Math.exp(-d * 3);
       if (u.mode === 'free') driveFree(u, d, target); else driveGraph(u, d, target);
       if (!u.on) continue;
-      if (u.chasing && dist < 4 && S.v < 3 && !S.crashed && !S.riding) { u.bustT += d; if (u.bustT > 1.3) { busted(); return; } } else u.bustT = Math.max(0, u.bustT - d);
+      if (u.chasing && PURSUIT.phase !== 'pullover' && dist < 4 && S.v < 3 && !S.crashed && !S.riding) { u.bustT += d; if (u.bustT > 1.3) { busted(); return; } } else u.bustT = Math.max(0, u.bustT - d);
       const flashOn = Math.floor(performance.now() / 150) % 2 === 0;
       u.lights[0].material = u.chasing && flashOn ? carMats.red : carMats.off;
       u.lights[1].material = u.chasing && !flashOn ? carMats.blue : carMats.off;
@@ -984,8 +1050,8 @@ function updateCamera(dt) {
   rig.head.visible = !(inPlay && pov === 'first' && !(S.crashed && reduceMotion));
   let fovT = 66 + Math.min(16, S.v * 0.45);
   let up = 0;
-  if (S.riding && RIDE.train && state !== 'menu') {
-    trainCamera(dt); fovT = camera.fov;
+  if ((WALK.on || (S.riding && RIDE.train)) && state !== 'menu') {
+    transitCamera(dt); fovT = camera.fov;
   } else if (state === 'menu') {
     menuT += dt * 0.25;
     const a = S.psi + Math.PI * 0.75 + Math.sin(menuT) * 0.7;
@@ -1069,10 +1135,10 @@ function updateCamera(dt) {
   sky.position.copy(camera.position);
   backdrop.position.set(camera.position.x, 0, camera.position.z);
   clouds.grp.position.set(camera.position.x, 0, camera.position.z);
-  const sd = C.sunDir || [0, 0.3, 1];
-  sun.position.copy(camera.position).add(tmp.set(sd[0], sd[1], sd[2]).normalize().multiplyScalar(1600)); sun.lookAt(camera.position);
-  ground.position.x = camera.position.x; ground.position.z = camera.position.z;
-  dirL.position.set(S.x + sd[0] * 120, Math.max(0.35, sd[1]) * 120 + 30, S.z + sd[2] * 120); dirL.target.position.set(S.x, 0, S.z);
+  // sunlight from the photographed sky's sun (a low sun still lights from low, but not from under the horizon)
+  const sy = Math.max(0.12, SUN.y);
+  updateWorld();
+  dirL.position.set(S.x + SUN.x * 200, sy * 200, S.z + SUN.z * 200); dirL.target.position.set(S.x, 0, S.z);
   headlight.position.set(S.x + fx * 0.9, 1.0, S.z + fz * 0.9); headlight.target.position.set(S.x + fx * 25, 0, S.z + fz * 25);
   if (rain) {
     rain.position.set(camera.position.x, 0, camera.position.z);
@@ -1143,6 +1209,7 @@ function updateHUD(dt) {
   } else wEl.hidden = true;
   const hint = $('#hint');
   if (performance.now() < hintUntil && !W.active) { hint.hidden = false; hint.textContent = B.type === 'gas' ? 'Roll in first or second, lean back (pull the mouse toward you), rev it and tap Space to dump the clutch. N opens the city map.' : 'Roll slow, lean back (pull the mouse toward you) and hold W, or tap Space to pop it up. N opens the city map.'; } else hint.hidden = true;
+  $('#hud').classList.toggle('transit', WALK.on || RIDE.on);
   updateBubbles();
   navTick(dt);
   mapT += dt; if (mapT > 0.1) { mapT = 0; drawMinimap(); }
@@ -1158,7 +1225,9 @@ function updateHUD(dt) {
   // street name: on a road, its name and highway shield; otherwise sidewalk / park / beach
   let street = '';
   const q = roadQuery(S.x, S.z, 10);
-  if (S.riding && RIDE.train) {
+  if (WALK.on) {
+    street = `${esc(WALK.st.name)} station<span class="shield">${esc(TRANSIT[cityKey] || 'Transit')}</span>`;
+  } else if (S.riding && RIDE.train) {
     const t = RIDE.train, ln = MAP.lines[t.line], a = ln.stations[0], b = ln.stations[ln.stations.length - 1];
     street = `${esc(TRANSIT[cityKey] || 'Train')}<span class="shield">${esc((t.dir > 0 ? b : a).name)}</span>`;
   } else if (q.e >= 0 && (q.in || q.d < q.hw + 3)) {
@@ -1199,7 +1268,7 @@ function frame(now) {
       simTime += rem;
       while (rem > 1e-6) {
         const d = Math.min(1 / 120, rem);
-        if (!S.riding) step(d); if (state !== 'play') break;
+        if (!S.riding && !WALK.on) step(d); if (state !== 'play') break;
         updateUnits(d); if (state !== 'play') break;
         updatePolice(d);
         rem -= d;
@@ -1207,7 +1276,7 @@ function frame(now) {
       updateFX(dt * ts);
       updatePeds(dt * ts);
       updateTrains(dt * ts);
-      if (state === 'play') updateRide(dt);
+      if (state === 'play') updateTransit(dt);
       updateWeather(dt, (msg) => popup(msg, ''));
     }
     const fx = S.crashed && S.cb ? S.cb.x : S.x, fz = S.crashed && S.cb ? S.cb.z : S.z;

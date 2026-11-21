@@ -235,7 +235,9 @@ async function decodeMap(meta, b64) {
   const tSeg = tIdx(), tNode = tIdx(), tBld = tIdx(), tTree = tIdx(), tRail = tIdx();
   for (let i = 0; i < tot - 1; i++) if (m.pE[i] === m.pE[i + 1]) tSeg.add(tkey((m.px[i] + m.px[i + 1]) / 2, (m.pz[i] + m.pz[i + 1]) / 2), i);
   for (let n = 0; n < N; n++) tNode.add(tkey(m.nx[n], m.nz[n]), n);
-  for (let b = 0; b < nB; b++) tBld.add(tkey(m.bx[m.bOff[b]], m.bz[m.bOff[b]]), b);
+  // each building is built by the tile at the middle of its footprint (not its first corner): a mall 600 m long
+  // otherwise only appeared once you were near one end of it
+  for (let b = 0; b < nB; b++) tBld.add(tkey((m.bBox[4 * b] + m.bBox[4 * b + 2]) / 2, (m.bBox[4 * b + 1] + m.bBox[4 * b + 3]) / 2), b);
   for (let i = 0; i < m.T; i++) tTree.add(tkey(m.tx[i], m.tz[i]), i);
   // transit track pieces, bus stops, landmarks and stations by tile (heavy-rail viaducts are left out: they floated over streets)
   m.lines.forEach((r, ri) => { for (let i = 0; i < r.xs.length - 1; i++) tRail.add(tkey((r.xs[i] + r.xs[i + 1]) / 2, (r.zs[i] + r.zs[i + 1]) / 2), ri * 65536 + i); });
@@ -253,7 +255,7 @@ async function decodeMap(meta, b64) {
 }
 
 // ---------------------------------------------------------------- queries
-const RQ = { e: -1, i: -1, t: 0, d: 1e9, s: 0, side: 0, hw: 0, in: false };
+const RQ = { e: -1, i: -1, t: 0, d: 1e9, s: 0, side: 0, hw: 0, in: false }, RQB = { ...RQ };
 // Nearest road segment within r metres. score = distance minus half-width, so the road you are "most inside" wins.
 function roadQuery(x, z, r = 12, filter = null, out = RQ) {
   const m = MAP; out.e = -1; out.d = 1e9; out.in = false;
@@ -389,27 +391,31 @@ function setupMapMaterials() {
   for (const k of Object.keys(MM)) { const v = MM[k]; if (Array.isArray(v)) v.forEach((x) => x.dispose && x.dispose()); else if (v && v.dispose) v.dispose(); delete MM[k]; }
   for (const v of signTexCache.values()) { v.tex.dispose(); v.mat.dispose(); }
   signTexCache.clear();
-  const night = C.night || C.dusk;
-  MM.asphalt = noiseTexture('#9a9a9a', 0.35, 256, 3, 0.04);
-  MM.concreteTex = paverTexture();
-  MM.road = new THREE.MeshStandardMaterial({ map: MM.asphalt, vertexColors: true, roughness: lerp(0.93, 0.32, WX.wet), metalness: 0.14 * WX.wet });
-  MM.walk = new THREE.MeshLambertMaterial({ map: MM.concreteTex, vertexColors: true, side: THREE.DoubleSide });
-  MM.curb = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  const night = C.night || C.dusk, low = quality === 'low';
+  // photo surfaces (world.js loads them); canvas fallbacks if they failed to load
+  MM.asphalt = TEX.asphalt_c || noiseTexture('#9a9a9a', 0.35, 256, 3, 0.04);
+  MM.concreteTex = TEX.sidewalk_c || paverTexture();
+  const asphaltAvg = TEX.asphalt_c ? texAverage(TEX.asphalt_c) : new THREE.Color(0.5, 0.5, 0.5);
+  MM.roadTint = 1 / Math.max(0.05, (asphaltAvg.r + asphaltAvg.g + asphaltAvg.b) / 3);
+  MM.road = low ? new THREE.MeshLambertMaterial({ map: MM.asphalt, vertexColors: true })
+    : new THREE.MeshStandardMaterial({ map: MM.asphalt, normalMap: TEX.asphalt_n || null, roughnessMap: TEX.asphalt_r || null, vertexColors: true, roughness: 1, metalness: 0, envMapIntensity: 0.8 });
+  if (!low) addWetRoad(MM.road);
+  // the road colours in CITIES are dark tints; scale so the photo keeps its own brightness: real dry asphalt is a
+  // mid-dark grey (about 10% reflectance), not black
+  MM.road.color.setScalar(Math.min(8, MM.roadTint * 2.6));
+  MM.walk = low ? new THREE.MeshLambertMaterial({ map: MM.concreteTex, vertexColors: true, side: THREE.DoubleSide })
+    : new THREE.MeshStandardMaterial({ map: MM.concreteTex, normalMap: TEX.sidewalk_n || null, roughnessMap: TEX.sidewalk_r || null, vertexColors: true, side: THREE.DoubleSide, roughness: 1, metalness: 0, envMapIntensity: 0.6 });
+  if (!low) addWetRoad(MM.walk);
+  MM.curb = low ? new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide })
+    : new THREE.MeshStandardMaterial({ map: TEX.sidewalk_c || null, vertexColors: true, side: THREE.DoubleSide, roughness: 0.85, metalness: 0 });
   MM.mark = new THREE.MeshLambertMaterial({ vertexColors: true, emissive: '#222222' });
   MM.water = new THREE.MeshStandardMaterial({ color: C.land.water, roughness: 0.12, metalness: 0.25, transparent: true, opacity: 0.93 });
-  MM.roof = quality === 'low' ? new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }) : new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.9, metalness: 0.05, envMapIntensity: 0.4 });
-  MM.walls = {};
-  MM.wallTex = [];
-  for (const [i, st] of ['house', 'mid', 'glass', 'brick', 'industrial', 'stone', 'shop'].entries()) {
-    const [tw, tl] = facadeTextures(st, C, 1234 + i * 77); MM.wallTex.push(tw, tl);
-    const em = { emissive: night ? '#ffd9a0' : '#000000', emissiveMap: tl, emissiveIntensity: C.night ? 1.0 : 0.8 };
-    if (quality === 'low') MM.walls[st] = new THREE.MeshLambertMaterial({ map: tw, vertexColors: true, side: THREE.DoubleSide, ...em });
-    else {
-      // physically based: glass towers mirror the sky, brick and stone stay matte, windows read as recessed via the bump map
-      const look = { glass: [0.14, 0.6], shop: [0.35, 0.15], industrial: [0.55, 0.35], house: [0.85, 0], mid: [0.8, 0.05], brick: [0.95, 0], stone: [0.8, 0] }[st];
-      MM.walls[st] = new THREE.MeshStandardMaterial({ map: tw, vertexColors: true, side: THREE.DoubleSide, roughness: look[0], metalness: look[1], bumpMap: st === 'glass' ? null : tw, bumpScale: 0.025, envMapIntensity: st === 'glass' ? 1.3 : 0.6, ...em });
-    }
-  }
+  MM.roof = low ? new THREE.MeshLambertMaterial({ map: TEX.roofgravel_c || null, vertexColors: true, side: THREE.DoubleSide })
+    : new THREE.MeshStandardMaterial({ map: TEX.roofgravel_c || null, normalMap: TEX.roofgravel_n || null, vertexColors: true, side: THREE.DoubleSide, roughness: 0.92, metalness: 0.02, envMapIntensity: 0.5 });
+  // facades: real photographed towers, and composed photo walls with windows for everything lower (world.js)
+  const fm = facadeMaterials();
+  MM.walls = fm.mats;
+  MM.wallTex = fm.disp;
   MM.concrete = new THREE.MeshLambertMaterial({ color: '#a8a49c', side: THREE.DoubleSide });
   MM.dome = new THREE.MeshLambertMaterial({ color: '#eceae4', side: THREE.DoubleSide });
   MM.glass = new THREE.MeshLambertMaterial({ color: '#a8c8d8', transparent: true, opacity: 0.35, side: THREE.DoubleSide });
@@ -419,20 +425,46 @@ function setupMapMaterials() {
   MM.tunnel = new THREE.MeshLambertMaterial({ color: '#3b3d41', side: THREE.DoubleSide, emissive: '#101113' });
   MM.tunnelLamp = new THREE.MeshBasicMaterial({ color: '#fff1c8', side: THREE.DoubleSide });
   MM.platform = new THREE.MeshLambertMaterial({ color: '#b9b6ae' });
+  MM.stationFloor = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  MM.stationMetal = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.4, metalness: 0.6 });
+  MM.stationDark = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, emissive: '#0a1a33' });
   MM.canopy = new THREE.MeshLambertMaterial({ color: '#d8dbdf' });
   MM.metal = new THREE.MeshLambertMaterial({ color: '#8d949a', side: THREE.DoubleSide });
   MM.pole = new THREE.MeshLambertMaterial({ color: '#3c3f45' });
-  MM.lamp = new THREE.MeshBasicMaterial({ color: night ? '#ffe2a8' : '#d9d4c6' });
-  MM.trunk = new THREE.MeshLambertMaterial({ color: '#6e5238' });
-  MM.leaf = new THREE.MeshLambertMaterial({ color: '#ffffff' });      // tinted per tree (instance colour)
-  MM.conifer = new THREE.MeshLambertMaterial({ color: '#ffffff' });
-  MM.frond = new THREE.MeshLambertMaterial({ color: C.night ? '#2f5a3a' : '#4a8a42', side: THREE.DoubleSide });
+  MM.lamp = new THREE.MeshBasicMaterial({ color: night ? '#ffe2a8' : '#d9d4c6', toneMapped: !night }); if (night) MM.lamp.color.multiplyScalar(2.2);   // glowing at night (bloom)
+  MM.trunk = low ? new THREE.MeshLambertMaterial({ map: TEX.bark_c || null, color: '#c8b8a8' }) : new THREE.MeshStandardMaterial({ map: TEX.bark_c || null, normalMap: TEX.bark_n || null, color: '#c8b8a8', roughness: 0.95, metalness: 0, side: THREE.DoubleSide });
+  MM.palmTrunk = low ? new THREE.MeshLambertMaterial({ map: TEX.palmbark_c || null }) : new THREE.MeshStandardMaterial({ map: TEX.palmbark_c || null, normalMap: TEX.palmbark_n || null, roughness: 0.95, metalness: 0, side: THREE.DoubleSide });
+  // foliage from real scanned leaves, tinted per tree (instance colour)
+  MM.leafTex = leafClusterTex(cityKey === 'van' || cityKey === 'nyc' ? 'maple' : 'round'); MM.needleTex = needleTex(); MM.frondTex = frondTex();
+  MM.leaf = foliageMaterial(MM.leafTex);
+  MM.conifer = foliageMaterial(MM.needleTex);
+  MM.frond = foliageMaterial(MM.frondTex);
+  for (const k of ['leaf', 'conifer', 'frond']) MM[k + 'Depth'] = MM[k].userData.depth;
   MM.sigBox = new THREE.MeshLambertMaterial({ color: '#1d1f22' });
   MM.sigOff = new THREE.MeshLambertMaterial({ color: '#262626' });
   MM.sigR = new THREE.MeshBasicMaterial({ color: '#ff2a1a' }); MM.sigY = new THREE.MeshBasicMaterial({ color: '#ffb000' }); MM.sigG = new THREE.MeshBasicMaterial({ color: '#2dff8a' });
   MM.signs = C.signs.map(([t, c]) => { const tex = signTexture(t, c); return new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }); });
+  // neon tubes (vertex colour per building), bright enough to bloom
+  MM.neon = C.neon ? new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false, color: new THREE.Color(2.2, 2.2, 2.2) }) : null;
   MM.landCol = Object.fromEntries(Object.entries(C.land).map(([k, v]) => [k, new THREE.Color(v)]));
+  applyWetness();
 }
+// Rain: roads and pavements darken and turn glossy, with standing water in the low spots (from a noise mask)
+const NEON_COL = ['#ff2d8a', '#36e0ff', '#ffc23a', '#b45cff', '#ff5a2a', '#4dff8a', '#ffffff'].map((c) => new THREE.Color(c));
+const WET = { value: 0 };
+function addWetRoad(mat) {
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.wetK = WET; sh.uniforms.detailMap = { value: detailTex };
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec2 vWetUV;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWetUV = (modelMatrix * vec4(transformed, 1.0)).xz;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float wetK; uniform sampler2D detailMap; varying vec2 vWetUV;')
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nfloat puddle = smoothstep(0.52, 0.6, texture2D(detailMap, vWetUV * 0.035).g) * wetK;\nroughnessFactor = mix(0.8 + 0.2 * roughnessFactor, mix(0.32, 0.04, puddle), wetK);\ndiffuseColor.rgb *= 1.0 - 0.38 * wetK - 0.2 * puddle;')
+      // dry asphalt and concrete barely mirror the sky; wet ones do
+      .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n#if defined( RE_IndirectSpecular )\nradiance *= mix(0.22, 0.6, wetK) + 0.4 * puddle;\n#endif');
+  };
+  mat.customProgramCacheKey = () => 'wet-road';
+}
+function applyWetness() { WET.value = WX.wet; }
 function acquireSign(key, makeTex, lit) {
   let v = signTexCache.get(key);
   if (!v) {
@@ -526,7 +558,7 @@ const STOP_GEO = {
 // ---------------------------------------------------------------- streamed tiles
 const tiles = new Map();
 const liveSignals = new Set();
-function tileRadius() { return Math.max(2, (quality === 'low' ? 2 : quality === 'ultra' ? 4 : 3) - GOV.dropRadius); }
+function tileRadius() { return Math.max(quality === 'low' || quality === 'med' ? 1 : 2, (quality === 'low' || quality === 'med' ? 2 : 3) - GOV.dropRadius); }
 function disposeTile(t) {
   for (const part of ['base', 'detail']) if (t[part]) disposePart(t, part);
   tiles.delete(t.key);
@@ -549,6 +581,7 @@ function updateTiles(cx, cz, force) {
     if (di > RB + 1 || dj > RB + 1) disposeTile(t);
     else if (t.detail && (di > RD + 1 || dj > RD + 1)) disposePart(t, 'detail');
   }
+  for (const t of tiles.values()) if (t.base && t.base.near) t.base.near.visible = Math.abs(t.i - ti) <= 1 && Math.abs(t.j - tj) <= 1;
   const todo = [];
   for (let a = ti - RB; a <= ti + RB; a++) for (let b = tj - RB; b <= tj + RB; b++) {
     const key = (a + 2048) * 4096 + (b + 2048), t = tiles.get(key), d = Math.hypot(a + 0.5 - cx / TILE, b + 0.5 - cz / TILE);
@@ -556,6 +589,14 @@ function updateTiles(cx, cz, force) {
     if (Math.abs(a - ti) <= RD && Math.abs(b - tj) <= RD && (!t || !t.detail)) todo.push([a, b, key, 'detail', d + 0.01]);
   }
   todo.sort((p, q) => p[4] - q[4]);
+  // the largest square round the player whose base tiles are all built: far skyline blocks inside it are hidden
+  let rb = 0;
+  for (let rr = 1; rr <= RB; rr++) {
+    let ok = true;
+    for (let a = ti - rr; a <= ti + rr && ok; a++) for (let b = tj - rr; b <= tj + rr; b++) { const t = tiles.get((a + 2048) * 4096 + (b + 2048)); if (!t || !t.base) { ok = false; break; } }
+    if (!ok) break; rb = rr;
+  }
+  if (typeof setStreamBox === 'function') { if (rb > 0) setStreamBox((ti - rb) * TILE, (tj - rb) * TILE, (ti + rb + 1) * TILE, (tj + rb + 1) * TILE); else setStreamBox(1e9, 1e9, -1e9, -1e9); }
   let budget = force ? 1e9 : 4;
   for (const [a, b, key, part] of todo) {
     let t = tiles.get(key);
@@ -566,6 +607,39 @@ function updateTiles(cx, cz, force) {
     budget -= 1 + (performance.now() - t0) / 4;
     if (budget <= 0) break;
   }
+}
+
+// Building look: style from the mapped material or the building type and height; colour from OSM where mapped.
+// Shared with the far skyline (world.js) so a tower looks the same near and far.
+const MATSTY = { 1: 'brick', 2: 'glass', 3: 'mid', 4: 'house', 5: 'industrial', 6: 'stone', 7: 'mid' };
+function buildingStyle(b, h) {
+  const m = MAP, kind = m.bKind[b], hs = hash2(b, 21);
+  let st = MATSTY[m.bMat[b]] || (kind === 4 ? 'industrial' : kind === 5 ? (h < 30 ? 'stone' : 'tower')
+    : (kind === 1 && h < 12) ? 'house' : h >= 36 ? towerStyle(hs)
+    : hs < (C.brick || 0) ? 'brick' : 'mid');
+  if (st === 'house' && h >= 14) st = 'mid';
+  if (st === 'brick' && h >= 24) st = 'brickt';
+  if (st === 'mid' && h >= 24) st = towerStyle(hash2(b, 22));
+  if (st === 'industrial' && h >= 24) st = 'office';
+  return st;
+}
+// towers by city: Vancouver and Miami glass, NYC more masonry and office grids
+function towerStyle(hs) {
+  const mix = { van: [0.42, 0.72, 0.84], miami: [0.45, 0.75, 0.86], la: [0.4, 0.6, 0.85], vegas: [0.45, 0.7, 0.88], nyc: [0.28, 0.4, 0.68] }[cityKey] || [0.4, 0.6, 0.8];
+  return hs < mix[0] ? 'glass' : hs < mix[1] ? 'glass2' : hs < mix[2] ? 'office' : cityKey === 'nyc' && hs > 0.86 ? 'brickt' : 'tower';
+}
+function buildingColor(b, style) {
+  const m = MAP;
+  if (PHOTO_FACADE[style]) {
+    // photographed facades keep their own colour: only a light tint, and the mapped colour only faintly
+    const c = new THREE.Color('#ffffff').multiplyScalar(0.82 + hash2(b, 3, 2) * 0.22);
+    if (m.bCol[b] >= 0) c.lerp(new THREE.Color(m.bCol[b]), 0.25);
+    return c;
+  }
+  const pal = C.walls[style] || WALL_DEFAULTS[style] || C.walls.mid;
+  const c = m.bCol[b] >= 0 ? new THREE.Color(m.bCol[b]) : new THREE.Color(pal[Math.floor(hash2(b, 7, 1) * pal.length)]).multiplyScalar(0.88 + hash2(b, 3, 2) * 0.2);
+  // the composed walls are already grey-washed photos: lift the tint toward white so they aren't too dark
+  return c.lerp(new THREE.Color('#ffffff'), style === 'brick' ? 0.35 : 0.2);
 }
 
 // ---- base: ground, water, roads, sidewalks, buildings, bridges, barriers, elevated rail
@@ -626,7 +700,28 @@ function buildBase(t) {
     const ax = m.px[i], az = m.pz[i], bx = m.px[i + 1], bz = m.pz[i + 1], amx = m.mx[i], amz = m.mz[i], bmx = m.mx[i + 1], bmz = m.mz[i + 1];
     const col = R.path ? (m.eCls[e] === 14 ? colPlaza : colPath) : (R.hwy && concreteHwy) ? colConc : colRoad;
     const tint = col.clone().multiplyScalar(0.92 + hash2(e, 1, 3) * 0.12);
-    rb.flat(ax - amx * hw, az - amz * hw, bx - bmx * hw, bz - bmz * hw, bx + bmx * hw, bz + bmz * hw, ax + amx * hw, az + amz * hw, y, tint, 1 / 7);
+    // The city is flat, so a bridge is drawn at street level. Where one passes over another street (the footbridges
+    // across the Strip, overpasses) its railings, side walls and, for footbridges, its deck would stand across that
+    // street as a wall. Those stretches are left open.
+    if (fl & F_BRIDGE) {
+      const L = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.ceil(L / 3));
+      const under = (x, z) => { const q = roadQuery(x, z, 14, (e2) => e2 !== e && !(m.eFlag[e2] & F_BRIDGE) && !RC[m.eCls[e2]].path, RQB); return q.e >= 0 && q.d < q.hw + 0.6; };
+      for (let k = 0; k < n; k++) {
+        const f0 = k / n, f1 = (k + 1) / n, P = (f) => [ax + (bx - ax) * f, az + (bz - az) * f, amx + (bmx - amx) * f, amz + (bmz - amz) * f];
+        const [x0, z0, m0x, m0z] = P(f0), [x1, z1, m1x, m1z] = P(f1), cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, cmx = (m0x + m1x) / 2, cmz = (m0z + m1z) / 2;
+        const midOver = under(cx, cz);
+        if (!(R.path && midOver)) rb.flat(x0 - m0x * hw, z0 - m0z * hw, x1 - m1x * hw, z1 - m1z * hw, x1 + m1x * hw, z1 + m1z * hw, x0 + m0x * hw, z0 + m0z * hw, y, tint, 1 / 7);
+        for (const s of [-1, 1]) {
+          const o = hw + 0.15;
+          if (midOver || under(cx + cmx * o * s, cz + cmz * o * s)) continue;
+          const r0x = x0 + m0x * o * s, r0z = z0 + m0z * o * s, r1x = x1 + m1x * o * s, r1z = z1 + m1z * o * s;
+          rails.wall(r0x, r0z, r1x, r1z, y, y + 1.1, cmx * s, cmz * s);
+          lineObs.push([r0x, r0z, r1x, r1z, 'Hit the railing', 0.12]);
+          const o2 = hw + 0.3;
+          fascia.wall(x0 + m0x * o2 * s, z0 + m0z * o2 * s, x1 + m1x * o2 * s, z1 + m1z * o2 * s, -1.6, y + 0.05, cmx * s, cmz * s);
+        }
+      }
+    } else rb.flat(ax - amx * hw, az - amz * hw, bx - bmx * hw, bz - bmz * hw, bx + bmx * hw, bz + bmz * hw, ax + amx * hw, az + amz * hw, y, tint, 1 / 7);
     if (R.walk && !(fl & (F_BRIDGE | F_TUNNEL))) {
       const w = hw + 2.6;
       sw.flat(ax - amx * w, az - amz * w, bx - bmx * w, bz - bmz * w, bx + bmx * w, bz + bmz * w, ax + amx * w, az + amz * w, 0.03, colWalk, 1 / 5);
@@ -644,15 +739,9 @@ function buildBase(t) {
       }
     }
     if (fl & F_BRIDGE) {
-      for (const s of [-1, 1]) {
-        const o = hw + 0.15, x0 = ax + amx * o * s, z0 = az + amz * o * s, x1 = bx + bmx * o * s, z1 = bz + bmz * o * s;
-        rails.wall(x0, z0, x1, z1, y, y + 1.1, amx * s, amz * s);
-        lineObs.push([x0, z0, x1, z1, 'Hit the railing', 0.12]);
-        const o2 = hw + 0.3, f0x = ax + amx * o2 * s, f0z = az + amz * o2 * s, f1x = bx + bmx * o2 * s, f1z = bz + bmz * o2 * s;
-        fascia.wall(f0x, f0z, f1x, f1z, -1.6, y + 0.05, amx * s, amz * s);
-      }
+      // (railings and side walls are drawn above, skipping the stretches over other streets)
       // deck underside
-      fascia.flat(ax - amx * (hw + 0.3), az - amz * (hw + 0.3), bx - bmx * (hw + 0.3), bz - bmz * (hw + 0.3), bx + bmx * (hw + 0.3), bz + bmz * (hw + 0.3), ax + amx * (hw + 0.3), az + amz * (hw + 0.3), -1.6, null, 0);
+      if (!R.path) fascia.flat(ax - amx * (hw + 0.3), az - amz * (hw + 0.3), bx - bmx * (hw + 0.3), bz - bmz * (hw + 0.3), bx + bmx * (hw + 0.3), bz + bmz * (hw + 0.3), ax + amx * (hw + 0.3), az + amz * (hw + 0.3), -1.6, null, 0);
     } else if (m.eCls[e] === 0 && !(fl & F_TUNNEL)) {
       // a median barrier only: on the left of a one-way carriageway, and only where the other direction is right there.
       // (Ramps merge on the right, so there is never a barrier between a ramp and the freeway.)
@@ -708,9 +797,10 @@ function buildBase(t) {
   if (!barr.empty) addMesh(barr.build(), MM.concrete);
 
   // Buildings. Style comes from the mapped material or the building type; colour from OSM where it's mapped.
-  const STY = ['house', 'mid', 'glass', 'brick', 'industrial', 'stone', 'shop'];
-  const W = Object.fromEntries(STY.map((st) => [st, new GeoBuf(true, true)])), roof = new GeoBuf(true);
+  const STY = Object.keys(FACADE_SIZE);
+  const W = Object.fromEntries(STY.map((st) => [st, new GeoBuf(true, true)])), roof = new GeoBuf(true, true);
   const signs = [], labels = [], domes = [], shopSigns = [];
+  const neon = C.neon && MM.neon ? new GeoBuf(true) : null;
   // real businesses (shop / cafe / restaurant nodes) matched to the building they're in
   const shopsIn = new Map();
   for (const si of m.tShop.get(t.key) || []) {
@@ -719,34 +809,30 @@ function buildBase(t) {
     let arr = shopsIn.get(bi); if (!arr) shopsIn.set(bi, arr = []);
     if (arr.length < 6 && !arr.some((o) => o[0] === sh[0])) arr.push(sh);
   }
-  const MATSTY = { 1: 'brick', 2: 'glass', 3: 'mid', 4: 'house', 5: 'industrial', 6: 'stone', 7: 'mid' };
-  const DIM = { house: [4, 3], mid: [3.6, 3.4], glass: [3.2, 3.9], brick: [3.4, 3.3], industrial: [6, 4.5], stone: [4, 4.2] };
   const v2 = [], bxs = [], bzs = [];
   const box = (cx, cz, w, d, y0, y1, ang, col) => {
     const c = Math.cos(ang), sn = Math.sin(ang), P = [[-w / 2, -d / 2], [w / 2, -d / 2], [w / 2, d / 2], [-w / 2, d / 2]].map(([a, b2]) => [cx + a * c - b2 * sn, cz + a * sn + b2 * c]);
     for (let k = 0; k < 4; k++) { const [x0, z0] = P[k], [x1, z1] = P[(k + 1) % 4], L = Math.hypot(x1 - x0, z1 - z0) || 1; W.mid.wall(x0, z0, x1, z1, y0, y1, (z1 - z0) / L, -(x1 - x0) / L, col, 0.001, 0.002, 0.001, 0.002); }
-    roof.v(P[0][0], y1, P[0][1], 0, 1, 0, col); roof.v(P[1][0], y1, P[1][1], 0, 1, 0, col); roof.v(P[2][0], y1, P[2][1], 0, 1, 0, col);
-    roof.v(P[0][0], y1, P[0][1], 0, 1, 0, col); roof.v(P[2][0], y1, P[2][1], 0, 1, 0, col); roof.v(P[3][0], y1, P[3][1], 0, 1, 0, col);
+    for (const k of [0, 1, 2, 0, 2, 3]) roof.v(P[k][0], y1, P[k][1], 0, 1, 0, col, P[k][0] / 6, P[k][1] / 6);
   };
   for (const b of m.tBld.get(t.key) || []) {
+    if (m.bHide && m.bHide[b]) continue;      // replaced by a hand-built landmark (landmarks.js)
     const o0 = m.bOff[b], o1 = m.bOff[b + 1], n = o1 - o0, h = m.bH[b] + hash2(b, 41) * 0.12, kind = m.bKind[b], fl = m.bFlags[b];
     let area = 0, cx = 0, cz = 0;
     for (let i = o0, j = o1 - 1; i < o1; j = i++) { area += m.bx[j] * m.bz[i] - m.bx[i] * m.bz[j]; cx += m.bx[i]; cz += m.bz[i]; }
     area /= 2; cx /= n; cz /= n; const sgn = area >= 0 ? 1 : -1, absA = Math.abs(area);
-    // pull each corner 8 cm towards the middle: neighbours that share a wall no longer z-fight
+    // pull each corner 8 cm towards the middle: neighbours that share a wall no longer z-fight (tower parts 22 cm, so a
+    // part standing on the edge of its podium does not fight the podium wall)
     bxs.length = 0; bzs.length = 0;
-    for (let i = o0; i < o1; i++) { const dx = cx - m.bx[i], dz = cz - m.bz[i], L = Math.hypot(dx, dz) || 1; bxs.push(m.bx[i] + dx / L * 0.08); bzs.push(m.bz[i] + dz / L * 0.08); }
-    const hs = hash2(b, 21);
-    let style = MATSTY[m.bMat[b]] || (kind === 4 ? 'industrial' : kind === 5 ? (h < 30 ? 'stone' : 'mid') : (kind === 1 && h < 12) ? 'house' : h >= 36 ? (hs < 0.72 ? 'glass' : 'mid') : hs < (C.brick || 0) ? 'brick' : 'mid');
-    if (style === 'house' && h >= 14) style = 'mid';
-    const pal = C.walls[style] || WALL_DEFAULTS[style];
-    const col = m.bCol[b] >= 0 ? new THREE.Color(m.bCol[b]) : new THREE.Color(pal[Math.floor(hash2(b, 7, 1) * pal.length)]).multiplyScalar(0.88 + hash2(b, 3, 2) * 0.2);
-    const [bayW, flH] = DIM[style];
+    const ins = fl & 16 ? 0.22 : 0.08;
+    for (let i = o0; i < o1; i++) { const dx = cx - m.bx[i], dz = cz - m.bz[i], L = Math.hypot(dx, dz) || 1; bxs.push(m.bx[i] + dx / L * ins); bzs.push(m.bz[i] + dz / L * ins); }
+    const style = buildingStyle(b, h), col = buildingColor(b, style);
+    const [texW, texH] = FACADE_SIZE[style];
     const gable = style === 'house' && n === 4 && h < 11 && absA < 400;
     const colDark = col.clone().multiplyScalar(0.55), colMid = col.clone().multiplyScalar(0.8), colPar = col.clone().multiplyScalar(0.78);
     const parapet = !gable && !(fl & 2) && h > 7 && style !== 'house';
     const wallTop = gable ? h - 2.2 : h;
-    const shop = (fl & 1) || (shopsIn.has(b) && style !== 'house' && h >= 5) || ((kind === 0 || kind === 2 || kind === 3) && h >= 6.5 && style !== 'industrial' && style !== 'house' && absA < 6000 && hash2(b, 31) < 0.55);
+    const shop = !(fl & 16) && ((fl & 1) || (shopsIn.has(b) && style !== 'house' && h >= 5) || ((kind === 0 || kind === 2 || kind === 3) && h >= 6.5 && style !== 'industrial' && style !== 'house' && absA < 6000 && hash2(b, 31) < 0.55));
     const band = shop ? 4.2 : -0.3;
     const spal = C.walls.shop || WALL_DEFAULTS.shop, shopCol = new THREE.Color(spal[Math.floor(hash2(b, 33) * spal.length)]), shopDark = shopCol.clone().multiplyScalar(0.7);
     let per = 0, longest = 0, li = 0;
@@ -756,20 +842,33 @@ function buildBase(t) {
       if (shop) W.shop.wall(x0, z0, x1, z1, -0.3, band, nx, nz, shopCol, per / 24, (per + L) / 24, 0, 1, shopDark);
       if (wallTop > band) {
         // darker toward the street (grime and shade), full colour higher up
-        const split = Math.min(wallTop, band + 6), uA = per / bayW / 8, uB = (per + L) / bayW / 8;
-        W[style].wall(x0, z0, x1, z1, band, split, nx, nz, col, uA, uB, band / flH / 8, split / flH / 8, shop ? colMid : colDark);
-        if (wallTop > split) W[style].wall(x0, z0, x1, z1, split, wallTop, nx, nz, col, uA, uB, split / flH / 8, wallTop / flH / 8);
+        const split = Math.min(wallTop, band + 6), uA = per / texW, uB = (per + L) / texW;
+        W[style].wall(x0, z0, x1, z1, band, split, nx, nz, col, uA, uB, band / texH, split / texH, shop ? colMid : colDark);
+        if (wallTop > split) W[style].wall(x0, z0, x1, z1, split, wallTop, nx, nz, col, uA, uB, split / texH, wallTop / texH);
       }
-      if (parapet) roof.wall(x0, z0, x1, z1, h - 0.05, h + 0.75, nx, nz, colPar);
+      if (parapet) roof.wall(x0, z0, x1, z1, h - 0.05, h + 0.75, nx, nz, colPar, per / 4, (per + L) / 4, 0, 0.2);
       per += L; if (L > longest) { longest = L; li = k; }
     }
-    const rc = new THREE.Color(style === 'house' ? (hash2(b, 9) < 0.5 ? '#4a4a4f' : '#6b4a3c') : style === 'industrial' ? '#8d9196' : '#5f6165').multiplyScalar(0.85 + hash2(b, 4) * 0.3);
+    // Vegas: neon bands round the crown of the resort towers and the casino roofs, light strips up tower corners
+    if (neon && !gable && style !== 'house' && (h >= 30 || (absA > 2500 && h >= 9))) {
+      const nc = NEON_COL[Math.floor(hash2(b, 61) * NEON_COL.length)], tall = h >= 60;
+      for (let k = 0; k < n; k++) {
+        const k2 = (k + 1) % n, L = Math.hypot(bxs[k2] - bxs[k], bzs[k2] - bzs[k]); if (L < 2) continue;
+        const nx = (bzs[k2] - bzs[k]) / L * sgn, nz = -(bxs[k2] - bxs[k]) / L * sgn, o = 0.12;
+        const x0 = bxs[k] + nx * o, z0 = bzs[k] + nz * o, x1 = bxs[k2] + nx * o, z1 = bzs[k2] + nz * o;
+        neon.wall(x0, z0, x1, z1, h - 1.5, h - 0.6, nx, nz, nc);
+        if (tall) neon.wall(x0, z0, x1, z1, h - 4.2, h - 3.7, nx, nz, nc);
+        if (!tall && h < 30) neon.wall(x0, z0, x1, z1, 5.2, 5.6, nx, nz, nc);
+        if (tall && L > 6 && n <= 12) { const w = 0.7 / L; neon.wall(x0, z0, x0 + (x1 - x0) * w, z0 + (z1 - z0) * w, 6, h - 4.2, nx, nz, nc); }
+      }
+    }
+    const rc = new THREE.Color(style === 'house' ?(hash2(b, 9) < 0.5 ? '#6a6a70' : '#8a6a5c') : style === 'industrial' ? '#c8ccd0' : '#a8aaac').multiplyScalar(0.8 + hash2(b, 4) * 0.35);
     if (gable) {
       const P = [0, 1, 2, 3].map((k) => [bxs[k], bzs[k]]);
       const l01 = Math.hypot(P[1][0] - P[0][0], P[1][1] - P[0][1]), l12 = Math.hypot(P[2][0] - P[1][0], P[2][1] - P[1][1]);
       const Q = l01 >= l12 ? P : [P[1], P[2], P[3], P[0]];
       const r0 = [(Q[0][0] + Q[3][0]) / 2, (Q[0][1] + Q[3][1]) / 2], r1 = [(Q[1][0] + Q[2][0]) / 2, (Q[1][1] + Q[2][1]) / 2];
-      const tri = (a, bb, c) => { roof.v(a[0], a[1], a[2], 0, 1, 0, rc); roof.v(bb[0], bb[1], bb[2], 0, 1, 0, rc); roof.v(c[0], c[1], c[2], 0, 1, 0, rc); };
+      const tri = (a, bb, c) => { for (const q of [a, bb, c]) roof.v(q[0], q[1], q[2], 0, 1, 0, rc, q[0] / 4, q[2] / 4 + q[1] / 4); };
       const yt = wallTop, yr = h;
       const A = (p) => [p[0], yt, p[1]], Rr = (p) => [p[0], yr, p[1]];
       tri(A(Q[0]), A(Q[1]), Rr(r1)); tri(A(Q[0]), Rr(r1), Rr(r0));
@@ -784,7 +883,7 @@ function buildBase(t) {
       for (let k = 0; k < n; k++) v2.push(new THREE.Vector2(bxs[k], bzs[k]));
       let faces;
       try { faces = THREE.ShapeUtils.triangulateShape(v2, []); } catch { faces = []; }
-      for (const f of faces) for (const k of f) roof.v(v2[k].x, h, v2[k].y, 0, 1, 0, rc);
+      for (const f of faces) for (const k of f) roof.v(v2[k].x, h, v2[k].y, 0, 1, 0, rc, v2[k].x / 6, v2[k].y / 6);
       // rooftop plant on bigger flat roofs: lift housing, AC units
       if (absA > 250 && style !== 'house' && !(fl & 2) && insideBuilding(b, cx, cz, 0)) {
         const ang = Math.atan2(bzs[1] - bzs[0], bxs[1] - bxs[0]), rcol = new THREE.Color('#9a9c9e');
@@ -835,15 +934,18 @@ function buildBase(t) {
   }
   for (const st of STY) if (!W[st].empty) addMesh(W[st].build(), MM.walls[st], { cast: true });
   if (!roof.empty) addMesh(roof.build(), MM.roof, { cast: true });
+  if (neon && !neon.empty) addMesh(neon.build(), MM.neon);
+  // shop and neon signs are one draw each: only shown on the tiles near you (updateTiles), unreadable further out
+  const near = new THREE.Group(); g.add(near);
   for (const s of signs) {
     const geo = new THREE.PlaneGeometry(s.w, s.w * 0.31), me = new THREE.Mesh(geo, MM.signs[s.mat]);
-    me.position.set(s.x, s.y, s.z); me.rotation.y = s.rot; g.add(me); disp.push(geo);
+    me.position.set(s.x, s.y, s.z); me.rotation.y = s.rot; near.add(me); disp.push(geo);
   }
   const signKeys = [];
   for (const s of shopSigns) {
     const [mat, key] = shopSignMat(s.name, s.kind); signKeys.push(key);
     const geo = new THREE.PlaneGeometry(s.w, Math.min(0.95, s.w * 0.25)), me = new THREE.Mesh(geo, mat);
-    me.position.set(s.x, s.y, s.z); me.rotation.y = s.rot; g.add(me); disp.push(geo);
+    me.position.set(s.x, s.y, s.z); me.rotation.y = s.rot; near.add(me); disp.push(geo);
   }
   for (const d of domes) {
     const geo = new THREE.SphereGeometry(1, 32, 12, 0, TAU, 0, Math.PI / 2), me = new THREE.Mesh(geo, MM.dome);
@@ -883,10 +985,12 @@ function buildBase(t) {
     }
     if (h0 < -0.4 || h1 < -0.4) {
       // tunnel box (wider on one side at stations for the platform); no roof where it would poke out of the ground
-      const wl = 2.6, wr = atStation ? 7.5 : 2.6, c0 = h0 + 5.4, c1 = h1 + 5.4, fy = Math.min(h0, h1) - 0.15;
+      // at stations the box is wide enough for the platform and the escalator lane beside it; the station adds the
+      // lane's own roof (leaving the escalator shaft open to the street)
+      const wl = 2.6, wr = atStation ? LANE_V1 + 0.1 : 2.6, wroof = atStation ? LANE_V0 - 0.05 : wr, c0 = h0 + 5.4, c1 = h1 + 5.4, fy = Math.min(h0, h1) - 0.15;
       for (const [s, w] of [[-1, wl], [1, wr]]) tun.wall(x0 + nx * w * s, z0 + nz * w * s, x1 + nx * w * s, z1 + nz * w * s, fy, Math.min(Math.max(c0, c1), 0.3), -nx * s, -nz * s);
       tun.flat(x0 - nx * wl, z0 - nz * wl, x1 - nx * wl, z1 - nz * wl, x1 + nx * wr, z1 + nz * wr, x0 + nx * wr, z0 + nz * wr, fy, null, 0);
-      if (c0 < -0.1 && c1 < -0.1) tun.flat(x0 - nx * wl, z0 - nz * wl, x1 - nx * wl, z1 - nz * wl, x1 + nx * wr, z1 + nz * wr, x0 + nx * wr, z0 + nz * wr, Math.min(c0, c1), null, 0);
+      if (c0 < -0.1 && c1 < -0.1) tun.flat(x0 - nx * wl, z0 - nz * wl, x1 - nx * wl, z1 - nz * wl, x1 + nx * wroof, z1 + nz * wroof, x0 + nx * wroof, z0 + nz * wroof, Math.min(c0, c1), null, 0);
       for (let s = Math.ceil(ln.cs[i] / 18) * 18; s < ln.cs[i + 1]; s += 18) {
         const f = (s - ln.cs[i]) / L, hh = h0 + (h1 - h0) * f; if (hh > -3) continue;
         const px = x0 + (x1 - x0) * f - nx * (wl - 0.1), pz = z0 + (z1 - z0) * f - nz * (wl - 0.1), ux = (x1 - x0) / L, uz = (z1 - z0) / L;
@@ -902,10 +1006,13 @@ function buildBase(t) {
   for (const st of m.tSta.get(t.key) || []) {
     const ln = m.lines[st.line], P = linePoint(ln, st.s, {}), rx = -P.dz, rz = P.dx;
     const y = P.h, cx = P.px + rx * 3.7, cz = P.pz + rz * 3.7, ang = Math.atan2(P.dx, P.dz);
-    const plat = new THREE.Mesh(new THREE.BoxGeometry(3.6, 1.0, 70), MM.platform); plat.position.set(cx, y + 0.5, cz); plat.rotation.y = ang; plat.receiveShadow = true; g.add(plat); disp.push(plat.geometry);
-    const edge = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.02, 70), MM.sigY); edge.position.set(cx - rx * 1.6, y + 1.01, cz - rz * 1.6); edge.rotation.y = ang; g.add(edge); disp.push(edge.geometry);
-    if (y > -1) { const can = new THREE.Mesh(new THREE.BoxGeometry(8.5, 0.3, 60), MM.canopy); can.position.set(P.px + rx * 1.5, y + 5.2, P.pz + rz * 1.5); can.rotation.y = ang; can.castShadow = true; g.add(can); disp.push(can.geometry); }
-    if (!labels.some((l) => l.text === st.name)) labels.push({ text: st.name, sub: `${TRANSIT[cityKey] || 'Transit'} · E to board`, x: st.x, z: st.z, y: Math.max(y, 0) + 11, col: '#2b6bff' });
+    const plat = new THREE.Mesh(new THREE.BoxGeometry(3.6, 1.0, PLAT_LEN), MM.platform); plat.position.set(cx, y + 0.5, cz); plat.rotation.y = ang; plat.receiveShadow = true; g.add(plat); disp.push(plat.geometry);
+    const edge = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.02, PLAT_LEN), MM.sigY); edge.position.set(cx - rx * 1.6, y + 1.01, cz - rz * 1.6); edge.rotation.y = ang; g.add(edge); disp.push(edge.geometry);
+    if (y > -1) { const can = new THREE.Mesh(new THREE.BoxGeometry(8.5, 0.3, PLAT_LEN - 6), MM.canopy); can.position.set(P.px + rx * 1.5, y + 5.2, P.pz + rz * 1.5); can.rotation.y = ang; can.castShadow = true; g.add(can); disp.push(can.geometry); }
+    // street hall with fare gates, and the escalator up (or down) to the platform
+    buildStationHall(st, g, disp, lineObs);
+    const F = stationFrame(st), door = F.W(F.hallStart - F.su * 2, (HALL_V0 + HALL_V1) / 2, 0);
+    if (!labels.some((l) => l.text === st.name)) labels.push({ text: st.name, sub: `${TRANSIT[cityKey] || 'Transit'} · E to go in`, x: door.x, z: door.z, y: 9, col: '#2b6bff' });
   }
   // landmarks that aren't buildings (monuments, viewpoints, attractions)
   for (const pi of m.tPoi.get(t.key) || []) {
@@ -920,7 +1027,7 @@ function buildBase(t) {
   }
 
   scene.add(g);
-  t.base = { g, disp, signs: signKeys };
+  t.base = { g, disp, signs: signKeys, near };
   const allObs = obs.concat(lineObs);
   t.baseObs = allObs; t.obs = t.detail ? t.obs.concat(allObs) : allObs.slice();
 }
@@ -1069,16 +1176,18 @@ function buildDetail(t) {
     const im = new THREE.InstancedMesh(geo, mat, list.length), q = new THREE.Quaternion(), m4 = new THREE.Matrix4(), p = new THREE.Vector3(), sc = new THREE.Vector3(), col = new THREE.Color();
     list.forEach(([x, z, s, rot], k) => {
       q.setFromAxisAngle(Yv, rot); m4.compose(p.set(x, 0, z), q, sc.set(s * (0.9 + (rot % 0.2)), s, s * (0.9 + ((rot * 7) % 0.2)))); im.setMatrixAt(k, m4);
-      if (palette) { col.set(palette[Math.floor((rot / TAU) * palette.length * 3) % palette.length]).multiplyScalar(C.night ? 0.55 : 0.92 + (rot % 0.15)); im.setColorAt(k, col); }
+      if (palette) { col.set(palette[Math.floor((rot / TAU) * palette.length * 3) % palette.length]).multiplyScalar(C.night ? 0.55 : 0.88 + (rot % 0.18)); im.setColorAt(k, col); }
     });
-    im.castShadow = cast; g.add(im); disp.push(im);
+    im.castShadow = cast; im.receiveShadow = true; if (mat.userData.depth) im.customDepthMaterial = mat.userData.depth; g.add(im); disp.push(im);
   };
-  const leafPal = cityKey === 'van' || cityKey === 'nyc' ? ['#3d6a34', '#4c7a3a', '#5a8a40', '#356030', '#6a8f3a', '#7a8a3a'] : ['#4a7a3f', '#5a8a46', '#3f6e38', '#6a9a4a', '#567a36'];
-  inst(treeTrunk, MM.trunk, trees.deci.concat(trees.con), false);
-  inst(treeCrown, MM.leaf, trees.deci, true, leafPal);
-  inst(conifer, MM.conifer, trees.con, true, ['#2b4a33', '#2f5236', '#24432d', '#355a3a']);
-  inst(palmTrunk, MM.trunk, trees.palm, false);
-  inst(palmCrown, MM.frond, trees.palm, true);
+  // tints over the real leaf colours: a little variety between trees
+  const leafPal = ['#ffffff', '#e8f0d8', '#f4f0d0', '#d8e8c8', '#fff4d8', '#e0e8e0'];
+  inst(barkTrunkGeo, MM.trunk, trees.deci, true);
+  inst(firTrunkGeo, MM.trunk, trees.con, true);
+  inst(leafCrownGeo, MM.leaf, trees.deci, true, leafPal);
+  inst(firGeo, MM.conifer, trees.con, true, ['#b8c8b0', '#a8bca0', '#c8d4b8', '#9ab092']);
+  inst(palmTrunkGeo, MM.palmTrunk, trees.palm, true);
+  inst(palmFrondGeo, MM.frond, trees.palm, true, ['#d8e0c0', '#c8d4b0', '#e0e4c8']);
 
   // Traffic signals: a pole and three-lamp head facing each approach
   for (const n of m.tNode.get(t.key) || []) {

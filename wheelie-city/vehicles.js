@@ -48,11 +48,13 @@ function carGeo(type) {
   const plates = []; for (const s of [1, -1]) { const p = new THREE.BoxGeometry(0.52, 0.12, 0.02); p.translate(0, T.r + 0.08, s * (T.L / 2 + 0.07)); plates.push(p); }
   return (geoCache[type] = { body, glass, roof, wheels: merge(wheels), hubs: merge(hubs), head: merge(head), tail: merge(tail), bump: merge(bump), plates: merge(plates), T });
 }
+function glowMat(c, k) { const m = new THREE.MeshBasicMaterial({ color: c, toneMapped: false }); m.color.multiplyScalar(k); return m; }
 const carMats = {
-  plate: new THREE.MeshLambertMaterial({ color: '#e8e8e2' }),
-  glass: M('#1b2028', 0.06, 0.9), tire: new THREE.MeshLambertMaterial({ color: '#141414' }), hub: M('#9aa0a6', 0.35, 0.8), bump: new THREE.MeshLambertMaterial({ color: '#1c1d20' }),
-  head: new THREE.MeshBasicMaterial({ color: '#fff4d6' }), tail: new THREE.MeshBasicMaterial({ color: '#ff2a2a' }), taxi: new THREE.MeshBasicMaterial({ color: '#fff7c2' }),
-  red: new THREE.MeshBasicMaterial({ color: '#ff2236' }), blue: new THREE.MeshBasicMaterial({ color: '#2b6bff' }), off: new THREE.MeshLambertMaterial({ color: '#3a3a40' }),
+  plate: M('#e8e8e2', 0.4, 0.2),
+  glass: M('#11161c', 0.04, 0.9, { envMapIntensity: 1.6 }), tire: M('#151515', 0.9, 0), hub: M('#b8bec4', 0.25, 0.9), bump: M('#1c1d20', 0.55, 0.1),
+  // lamps glow past white so the bloom picks them up
+  head: glowMat('#fff4d6', 2.4), tail: glowMat('#ff2a2a', 1.6), taxi: glowMat('#fff7c2', 1.3),
+  red: glowMat('#ff2236', 3), blue: glowMat('#2b6bff', 3), off: new THREE.MeshLambertMaterial({ color: '#3a3a40' }),
   uniform: M('#1d2a44', 0.8), helmet: M('#f4f4f2', 0.3), copBlack: M('#141518', 0.4, 0.4),
 };
 function buildCarModel(type, paint, extra = {}) {
@@ -104,10 +106,11 @@ function buildUnitPools() {
   for (const u of units) scene.remove(u.g);
   units.length = 0;
   for (const m of carPaint) m.dispose();
-  carPaint = C.cars.map((c) => M(c, 0.32, 0.45));
+  // clear-coated paint: a sharp reflection of the sky over the colour, like a freshly washed car
+  carPaint = C.cars.map((c) => quality === 'low' ? M(c, 0.32, 0.45) : new THREE.MeshPhysicalMaterial({ color: c, roughness: 0.38, metalness: 0.6, clearcoat: 1, clearcoatRoughness: 0.04, envMapIntensity: 1.3 }));
   if (copMats) Object.values(copMats).forEach((m) => { if (m.map) m.map.dispose(); m.dispose(); });
   copMats = {
-    body: M(C.cop.body, 0.32, 0.45), panelMat: M(C.cop.panel, 0.35, 0.4), stripeMat: new THREE.MeshLambertMaterial({ color: C.cop.stripe }),
+    body: quality === 'low' ? M(C.cop.body, 0.32, 0.45) : new THREE.MeshPhysicalMaterial({ color: C.cop.body, roughness: 0.38, metalness: 0.5, clearcoat: 1, clearcoatRoughness: 0.05 }), panelMat: M(C.cop.panel, 0.35, 0.4), stripeMat: new THREE.MeshLambertMaterial({ color: C.cop.stripe }),
     decalMat: new THREE.MeshBasicMaterial({ map: decalTexture(C.cop.text, C.cop.stripe === C.cop.body ? '#111' : C.cop.stripe), transparent: true, side: THREE.DoubleSide }),
   };
   const types = ['sedan', 'sedan', 'suv', 'hatch', 'suv', 'pickup', 'van', 'sedan'];
@@ -271,7 +274,8 @@ function deactivate(u) { u.on = false; u.g.visible = false; u.chasing = false; }
 function driveFree(u, d, targetV) {
   u.v += clamp(targetV - u.v, -9 * d, 6 * d);
   const lead = Math.min(1.2, Math.hypot(S.x - u.x, S.z - u.z) / 20);
-  const tx = S.x + Math.sin(S.psi) * S.v * lead, tz = S.z + Math.cos(S.psi) * S.v * lead;
+  // a set aim point (behind you for a stop, your back wheel for a PIT), else just ahead of where you're going
+  const tx = u.aimX != null ? u.aimX : S.x + Math.sin(S.psi) * S.v * lead, tz = u.aimX != null ? u.aimZ : S.z + Math.cos(S.psi) * S.v * lead;
   const want = Math.atan2(tx - u.x, tz - u.z), turn = u.kind === 'moto' ? 2.8 : 1.8;
   u.yaw += clamp(wrapPi(want - u.yaw), -turn * d, turn * d);
   const nx = u.x + Math.sin(u.yaw) * u.v * d, nz = u.z + Math.cos(u.yaw) * u.v * d;

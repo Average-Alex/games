@@ -202,6 +202,26 @@ class Handler(osmium.SimpleHandler):
                         if is_station(t): self.stations.append((t.get('name'), round(cx), round(cz)))
                         else: self.pois.append((t.get('name'), poi_kind(t), round(cx), round(cz)))
                 break
+        # Tower sections of a building mapped in parts (building:part). Without them a tower mapped as a podium outline
+        # plus parts only showed its podium: "half the building". Each part is extruded from the ground to its top; a part
+        # that floats (a skywalk, an overhang) would stand in the street, so only parts that reach the ground or are tall
+        # towers on a podium are kept.
+        bp = t.get('building:part')
+        if bp and 'building' not in t and bp not in ('no', 'roof', 'canopy', 'carport', 'balcony', 'steps', 'corridor', 'bridge', 'construction'):
+            if t.get('location') in ('underground', 'roof') or t.get('layer', '0').startswith('-'): return
+            ht = parse_m(t.get('height')); mh = parse_m(t.get('min_height'))
+            lv = parse_m(t.get('building:levels')); ml = parse_m(t.get('building:min_level'))
+            if ht is None and lv: ht = lv * 3.2 + 1.5 + (ml or 0) * 3.2
+            if mh is None and ml: mh = ml * 3.2
+            mh = mh or 0
+            if ht is None or ht < 3: return
+            if mh > 0.5 and not (ht >= 25 and ht - mh >= 2 * mh): return
+            tags = dict(t); tags['_part'] = '1'; tags['height'] = str(ht)
+            for ring in a.outer_rings():
+                p = [self.proj(n.lon, n.lat) for n in ring]
+                if len(p) < 4 or not self.inbox(p[0][0], p[0][1], 50): continue
+                self.buildings.append((p[:-1], tags))
+            return
         if 'building' in t and t.get('building') not in ('no', 'roof', 'construction', 'canopy', 'carport', 'bridge', 'ruins', 'transformer_tower', 'ship'):
             # floating (skywalks, parkades over streets) and underground buildings would stand in the street
             if (parse_m(t.get('min_height')) or 0) > 0.5 or (parse_m(t.get('building:min_level')) or 0) > 0: return
@@ -241,7 +261,7 @@ def build(key, osmdir):
     def inbox(x, z, m):
         return gx0 - m <= x <= gx1 + m and gz0 - m <= z <= gz1 + m
 
-    cache = os.path.join(osmdir, f'{key}.parsed4.pickle')
+    cache = os.path.join(osmdir, f'{key}.parsed5.pickle')
     h = Handler(proj, inbox)
     if os.path.exists(cache) and os.path.getmtime(cache) > os.path.getmtime(os.path.join(osmdir, cfg['src'])):
         print(f'[{key}] using cached parse', flush=True)
@@ -302,6 +322,35 @@ def build(key, osmdir):
         if b in ('church', 'cathedral', 'school', 'university', 'college', 'hospital', 'civic', 'public', 'government', 'train_station', 'transportation', 'stadium', 'museum', 'library', 'fire_station'): return 5
         return 0
     DEF_H = {0: 8, 1: 7, 2: 14, 3: 9, 4: 9, 5: 12}
+    # Heights OSM doesn't have: Overture Maps buildings (tools/overture_heights.py) with an estimated height, joined
+    # by their centroid falling inside the OSM outline. Without this most of Vancouver and almost all of Las Vegas
+    # (the Strip towers included) were drawn at a guessed 8-20 m.
+    ov_grid, OG = {}, 40.0
+    ov_path = os.path.join(osmdir, f'{key}.overture.pickle')
+    if os.path.exists(ov_path):
+        with open(ov_path, 'rb') as f:
+            for lon, lat, oh, fl_, _rs, _rh, omh, _ba in pickle.load(f):
+                hh = oh if oh else (fl_ * 3.3 + 1.5 if fl_ else None)
+                if not hh or hh < 2.5: continue
+                if omh and omh > 0.5: continue
+                x, z = proj(lon, lat)
+                ov_grid.setdefault((int(x // OG), int(z // OG)), []).append((x, z, float(hh)))
+        print(f'[{key}] overture heights {sum(len(v) for v in ov_grid.values())}', flush=True)
+    def ring_in(ring, x, z):
+        inside = False
+        for i in range(len(ring)):
+            (x0, z0), (x1, z1) = ring[i - 1], ring[i]
+            if (z0 > z) != (z1 > z) and x < x0 + (z - z0) * (x1 - x0) / (z1 - z0): inside = not inside
+        return inside
+    def overture_height(ring):
+        xs = [q_[0] for q_ in ring]; zs = [q_[1] for q_ in ring]
+        best = None
+        for gx_ in range(int(min(xs) // OG), int(max(xs) // OG) + 1):
+            for gz_ in range(int(min(zs) // OG), int(max(zs) // OG) + 1):
+                for x, z, hh in ov_grid.get((gx_, gz_), ()):
+                    if ring_in(ring, x, z) and (best is None or hh > best): best = hh
+        return best
+    n_ov = 0
     bl = []
     for ring, t in h.buildings:
         far = max(range(len(ring)), key=lambda i: (ring[i][0] - ring[0][0]) ** 2 + (ring[i][1] - ring[0][1]) ** 2)
@@ -314,7 +363,11 @@ def build(key, osmdir):
         ht = parse_m(t.get('height'))
         if ht is None:
             lv = parse_m(t.get('building:levels'))
-            ht = lv * 3.2 + 1.5 if lv else DEF_H[k] + (0 if area < 400 else min(10, area / 300))
+            if lv: ht = lv * 3.2 + 1.5
+            elif ov_grid and not t.get('_part'):
+                ht = overture_height(ring)
+                if ht: n_ov += 1
+            if ht is None: ht = DEF_H[k] + (0 if area < 400 else min(10, area / 300))
         ht = max(2.5, min(600, ht))
         # big, detailed outlines (malls, stadiums): simplify harder instead of cutting them off
         tol = 0.5
@@ -332,10 +385,38 @@ def build(key, osmdir):
         nm = t.get('name') or ''
         landmark = 1 if nm and (poi_kind(t) or t.get('building') in ('stadium', 'cathedral', 'church', 'train_station', 'museum', 'civic', 'government')
                                 or ht > 110 or (t.get('amenity') == 'place_of_worship' and area > 400)) else 0
-        flags = shop | (2 if roof == 'dome' or (t.get('building') == 'stadium' and area > 15000) else 0) | (4 if roof in ('gabled', 'hipped', 'pyramidal') else 0) | (8 * landmark)
+        part = 1 if t.get('_part') else 0
+        if part: shop = 0; landmark = 0
+        flags = shop | (2 if roof == 'dome' or (t.get('building') == 'stadium' and area > 15000) else 0) | (4 if roof in ('gabled', 'hipped', 'pyramidal') else 0) | (8 * landmark) | (16 * part)
         ni = sidx(nm) if nm and len(names) < 65000 else 0
         bl.append((ring, k, ht, ni | (mat << 16) | (flags << 24), col))
-    print(f'[{key}] buildings kept {len(bl)}', flush=True)
+    # An outline that holds tower parts drops to its shortest part (usually the podium); the parts rise from there.
+    def point_in(ring, x, z):
+        inside = False
+        for i in range(len(ring)):
+            (x0, z0), (x1, z1) = ring[i - 1], ring[i]
+            if (z0 > z) != (z1 > z) and x < x0 + (z - z0) * (x1 - x0) / (z1 - z0): inside = not inside
+        return inside
+    parts = [i for i, b in enumerate(bl) if (b[3] >> 24) & 16]
+    if parts:
+        G, grid = 100.0, {}
+        for i, (ring, k, ht, ex, col) in enumerate(bl):
+            if (ex >> 24) & 16: continue
+            xs = [q_[0] for q_ in ring]; zs = [q_[1] for q_ in ring]
+            for gx in range(int(min(xs) // G), int(max(xs) // G) + 1):
+                for gz in range(int(min(zs) // G), int(max(zs) // G) + 1):
+                    grid.setdefault((gx, gz), []).append(i)
+        lower = {}
+        for pi in parts:
+            ring, _, pht, _, _ = bl[pi]
+            cx = sum(q_[0] for q_ in ring) / len(ring); cz = sum(q_[1] for q_ in ring) / len(ring)
+            for oi in grid.get((int(cx // G), int(cz // G)), []):
+                if point_in(bl[oi][0], cx, cz): lower[oi] = min(lower.get(oi, 1e9), pht)
+        for oi, h_ in lower.items():
+            ring, k, ht, ex, col = bl[oi]
+            bl[oi] = (ring, k, min(ht, h_), ex, col)
+        print(f'[{key}] building parts {len(parts)}, outlines lowered to their podium {len(lower)}', flush=True)
+    print(f'[{key}] buildings kept {len(bl)}, heights from Overture {n_ov}', flush=True)
 
     # ---------- landcover raster
     W = int(math.ceil((gx1 - gx0) / RES)); H = int(math.ceil((gz1 - gz0) / RES))

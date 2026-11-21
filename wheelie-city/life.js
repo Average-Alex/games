@@ -51,7 +51,8 @@ function buildPeds() {
     const limb = (geo, hand, hex, x, y) => { const pv = new THREE.Group(); pv.position.set(x, y, 0); pv.add(new THREE.Mesh(mergeColored([[geo, hex], [hand, hand === PED.shoe ? '#222' : skin]]), pedMat)); body.add(pv); return pv; };
     const legL = limb(PED.leg, PED.shoe, legs, 0.1, 0.9), legR = limb(PED.leg, PED.shoe, legs, -0.1, 0.9);
     const armL = limb(PED.arm, PED.hand, top, 0.245, 1.5), armR = limb(PED.arm, PED.hand, top, -0.245, 1.5);
-    const sc = 0.9 + r() * 0.2; g.scale.setScalar(sc);
+    // people come in all heights and builds
+    const sc = 0.88 + r() * 0.24, wide = 0.9 + r() * 0.24; g.scale.set(sc * wide, sc, sc * (0.95 + (wide - 1) * 0.6));
     g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
     g.visible = false; scene.add(g);
     peds.push({ g, body, legL, legR, armL, armR, on: false, x: 0, z: 0, yaw: 0, phase: r() * TAU, knock: null, dodge: 0, hitCd: 0 });
@@ -63,7 +64,9 @@ function spawnPed(p) {
     const a = Math.random() * TAU, d = 30 + Math.random() * 110, x = S.x + Math.sin(a) * d, z = S.z + Math.cos(a) * d;
     const q = roadQuery(x, z, 30, pedEdge); if (q.e < 0) continue;
     const R = RC[MAP.eCls[q.e]];
-    Object.assign(p, { on: true, e: q.e, s: q.s, dir: Math.random() < 0.5 ? 1 : -1, side: Math.random() < 0.5 ? 1 : -1, v: 1.1 + Math.random() * 0.6, knock: null, dodge: 0, idle: Math.random() < 0.12 ? 4 + Math.random() * 10 : 0 });
+    const idle = Math.random() < 0.22;
+    Object.assign(p, { on: true, e: q.e, s: q.s, dir: Math.random() < 0.5 ? 1 : -1, side: Math.random() < 0.5 ? 1 : -1, v: 0.95 + Math.random() * 0.75, knock: null, dodge: 0,
+      idle: idle ? 6 + Math.random() * 18 : 0, pose: idle ? pick(Math.random, IDLE_POSES) : 'stand', watch: null, busy: Math.random() < 0.25 ? 'phone' : '' });
     p.off = R.path ? (Math.random() - 0.5) * 1.2 : MAP.eHW[q.e] + 1.0 + Math.random() * 1.0;
     pedPlace(p);
     if (buildingAt(p.x, p.z, 0.3) >= 0 || hitAt(p.x, p.z, 0.3)) continue;
@@ -128,13 +131,26 @@ function updatePeds(d) {
     }
     pedPlace(p);
     if (buildingAt(p.x, p.z, 0.15) >= 0) { p.dir = -p.dir; p.s += p.dir * 0.5; pedPlace(p); }
-    // walk cycle
+    // walk cycle: stride and arm swing grow with pace, hips sway and the shoulders counter-twist; standing still,
+    // people are on their phone, texting, arms folded, or watching (and filming) whatever just happened
     const walking = p.idle <= 0;
     p.phase += (walking ? p.v * 5.2 : 0) * d;
-    const sw = walking ? Math.sin(p.phase) : 0;
-    p.legL.rotation.x = sw * 0.55; p.legR.rotation.x = -sw * 0.55; p.armL.rotation.x = -sw * 0.45; p.armR.rotation.x = sw * 0.45;
-    p.g.position.set(p.x, (p.off > 1.5 ? CURB : 0.03) + Math.abs(Math.cos(p.phase)) * 0.03 * (walking ? 1 : 0), p.z);
+    p.breath = (p.breath || 0) + d;
+    const sw = walking ? Math.sin(p.phase) : 0, amp = 0.38 + p.v * 0.14;
+    p.legL.rotation.set(sw * amp, 0, 0); p.legR.rotation.set(-sw * amp, 0, 0);
+    if (walking) {
+      if (p.busy === 'phone') { p.armL.rotation.set(-sw * amp * 0.8, 0, 0.06); p.armR.rotation.set(-1.2, 0, 0.3); }     // eyes on the phone while walking
+      else { p.armL.rotation.set(-sw * amp * 0.85, 0, 0.07); p.armR.rotation.set(sw * amp * 0.85, 0, -0.07); }
+      p.body.rotation.set(0.04, sw * 0.07, Math.cos(p.phase) * 0.025);
+    } else {
+      const P = IDLE_ARMS[p.pose] || IDLE_ARMS.stand, br = Math.sin(p.breath * 1.6) * 0.02;
+      p.armL.rotation.set(P[0] + br, 0, P[1]); p.armR.rotation.set(P[2] + br, 0, P[3]);
+      p.body.rotation.set(br * 0.5, 0, Math.sin(p.breath * 0.4) * 0.02);       // shifting weight
+      if (p.watch) p.yaw = Math.atan2(p.watch[0] - p.x, p.watch[1] - p.z);
+    }
+    p.g.position.set(p.x, (p.off > 1.5 ? CURB : 0.03) + Math.abs(Math.cos(p.phase)) * 0.035 * (walking ? 1 : 0), p.z);
     p.g.rotation.y += wrapPi(p.yaw - p.g.rotation.y) * Math.min(1, d * 8);
+    if (p.idle <= 0 && p.watch) p.watch = null;
     // getting hit
     if (!S.crashed && !S.riding && p.hitCd <= 0 && S.v > 1.5) {
       const B = BIKES[bikeKey], hx = S.x + fx * B.L * 0.5, hz = S.z + fz * B.L * 0.5;
@@ -159,202 +175,17 @@ function hitPed(p) {
   if (v > 10) crash('Hit a pedestrian', 'pole');
   else S.v *= 0.45;
 }
+// standing poses: [left arm forward, left arm out, right arm forward, right arm out] (radians)
+const IDLE_POSES = ['phone', 'text', 'text', 'fold', 'stand', 'stand'];
+const IDLE_ARMS = { stand: [0.04, 0.08, 0.04, -0.08], phone: [0.04, 0.08, -1.25, 0.32], text: [-1.15, -0.3, -1.15, 0.3], fold: [-0.75, -0.75, -0.75, 0.75], film: [-1.55, -0.15, -1.55, 0.15] };
+// A crash nearby: people stop, turn to look, and some get their phones out
+function pedsReact(x, z) {
+  for (const p of peds) {
+    if (!p.on || p.knock || Math.hypot(p.x - x, p.z - z) > 40) continue;
+    p.idle = 5 + Math.random() * 5; p.watch = [x, z]; p.pose = Math.random() < 0.45 ? 'film' : Math.random() < 0.5 ? 'stand' : 'fold';
+    if (Math.random() < 0.15) say(p, pick(Math.random, ['Oh my god!', 'Is he OK?!', 'Ooof.', 'Did you see that?!', 'Somebody call 911!']), false);
+  }
+}
 const PED_DODGE = ['Whoa!', 'Hey!', 'Watch it!', 'Sidewalk, buddy!', 'Seriously?!', 'Slow down!'];
 const PED_CURSES = ['My LEG!!', 'Are you insane?!', 'I\'m calling the cops!', 'You hit me!!', 'Get back here!'];
 
-// ---------------------------------------------------------------- trains
-const CAR_LEN = 17.2, CAR_GAP = 0.6;
-const LIVERY = {
-  van: { body: '#f2f4f5', band: '#0057b8', band2: '#ffd200', cars: 4, v: 22 },
-  la: { body: '#c9ccd0', band: '#c9a227', band2: '#0072bc', cars: 3, v: 20 },
-  vegas: { body: '#2b6cb0', band: '#f2f2f2', band2: '#ffcc00', cars: 4, v: 18 },
-  miami: { body: '#d9dcdf', band: '#f47b20', band2: '#2a9d4a', cars: 4, v: 20 },
-  nyc: { body: '#b8bcc0', band: '#2a2d33', band2: '#e04040', cars: 6, v: 17 },
-};
-const trains = [];
-let trainGeo = null;
-function buildTrains() {
-  for (const t of trains) scene.remove(t.g);
-  trains.length = 0;
-  const L = LIVERY[cityKey] || LIVERY.van;
-  trainGeo = {
-    body: mergeColored([[new THREE.BoxGeometry(2.7, 2.9, CAR_LEN).translate(0, 1.85, 0), L.body],
-      [new THREE.BoxGeometry(2.74, 0.35, CAR_LEN - 0.2).translate(0, 1.05, 0), L.band],
-      [new THREE.BoxGeometry(2.74, 0.1, CAR_LEN - 0.2).translate(0, 3.1, 0), L.band2],
-      [new THREE.BoxGeometry(2.76, 0.95, CAR_LEN - 1.4).translate(0, 2.25, 0), '#1b2129'],
-      [new THREE.BoxGeometry(2.2, 0.45, CAR_LEN - 2).translate(0, 0.35, 0), '#2a2c30']]),
-    nose: mergeColored([[new THREE.BoxGeometry(2.5, 1.3, 0.1).translate(0, 2.3, 0), '#12161c'], [new THREE.BoxGeometry(0.5, 0.15, 0.08).translate(0.8, 1.4, 0), '#fff4d6'], [new THREE.BoxGeometry(0.5, 0.15, 0.08).translate(-0.8, 1.4, 0), '#fff4d6']]),
-  };
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.35, metalness: 0.45 });
-  for (let k = 0; k < 6; k++) {
-    const g = new THREE.Group(), cars = [];
-    for (let c = 0; c < L.cars; c++) {
-      const cg = new THREE.Group(), me = new THREE.Mesh(trainGeo.body, mat); me.castShadow = true; cg.add(me);
-      if (c === 0 || c === L.cars - 1) { const nose = new THREE.Mesh(trainGeo.nose, mat); nose.position.z = (c === 0 ? 1 : -1) * (CAR_LEN / 2 + 0.03); if (c !== 0) nose.rotation.y = Math.PI; cg.add(nose); }
-      g.add(cg); cars.push(cg);
-    }
-    g.visible = false; scene.add(g);
-    trains.push({ g, cars, on: false, line: -1, s: 0, dir: 1, v: 0, dwell: 0, nextSt: null, mine: false });
-  }
-}
-const TP = { px: 0, pz: 0, h: 0, dx: 0, dz: 1 };
-function placeTrain(t) {
-  const ln = MAP.lines[t.line], L = LIVERY[cityKey] || LIVERY.van;
-  for (let c = 0; c < t.cars.length; c++) {
-    const sc = t.s - t.dir * c * (CAR_LEN + CAR_GAP);
-    linePoint(ln, sc, TP);
-    // aim along the chord from the car's rear to its front so it follows curves
-    const f = linePoint(ln, sc + t.dir * CAR_LEN / 2, {}), b = linePoint(ln, sc - t.dir * CAR_LEN / 2, {});
-    const cg = t.cars[c];
-    cg.position.set(TP.px, TP.h + 0.05, TP.pz);
-    cg.rotation.set(0, Math.atan2(f.px - b.px, f.pz - b.pz), 0);
-    cg.rotation.x = -Math.atan2(f.h - b.h, CAR_LEN);
-  }
-  void L;
-  linePoint(ln, t.s, TP); t.x = TP.px; t.z = TP.pz; t.h = TP.h;
-}
-// Next station ahead of the train in its direction of travel
-function nextStation(t) {
-  const st = MAP.lines[t.line].stations;
-  return t.dir > 0 ? st.find((s) => s.s > t.s + 1) : [...st].reverse().find((s) => s.s < t.s - 1);
-}
-function updateTrains(d) {
-  if (!MAP || !MAP.lines.length) return;
-  const L = LIVERY[cityKey] || LIVERY.van;
-  // keep a train running on each line that passes near you
-  for (const ln of MAP.lines) {
-    if (trains.some((t) => t.on && t.line === ln.id)) continue;
-    let near = 1e9; for (let i = 0; i < ln.xs.length; i += 3) near = Math.min(near, Math.hypot(ln.xs[i] - S.x, ln.zs[i] - S.z));
-    if (near > 700) continue;
-    const t = trains.find((x) => !x.on); if (!t) break;
-    // start it a little way off so you see it pull in
-    let s0 = 0, bd = 1e9; for (let i = 0; i < ln.xs.length; i++) { const dd = Math.hypot(ln.xs[i] - S.x, ln.zs[i] - S.z); if (dd < bd) { bd = dd; s0 = ln.cs[i]; } }
-    const dir = Math.random() < 0.5 ? 1 : -1;
-    Object.assign(t, { on: true, line: ln.id, dir, s: clamp(s0 - dir * (300 + Math.random() * 300), 40, ln.len - 40), v: L.v * 0.8, dwell: 0, mine: false });
-    t.g.visible = true;
-  }
-  for (const t of trains) {
-    if (!t.on) continue;
-    const ln = MAP.lines[t.line];
-    if (!t.mine && Math.hypot(t.x - S.x, t.z - S.z) > 1100) { t.on = false; t.g.visible = false; continue; }
-    if (t.dwell > 0) { t.dwell -= d; if (t.dwell <= 0) t.nextSt = null; placeTrain(t); continue; }
-    if (t.nextSt && t.dir * (t.nextSt.s - t.s) < -1) t.nextSt = null;     // went past it (teleport or line change)
-    if (!t.nextSt) t.nextSt = nextStation(t);
-    const ns = t.nextSt;
-    let target = L.v;
-    if (ns) {
-      const rem = Math.abs(ns.s - t.s);
-      target = Math.min(target, Math.sqrt(2 * 1.1 * Math.max(0, rem - 1)) + 0.3);
-      if (rem < 1.2) { t.s = ns.s; t.v = 0; t.dwell = t.mine ? 6 : 9; t.atSt = ns; t.nextSt = null; placeTrain(t); continue; }
-    }
-    // end of the line: reverse
-    if ((t.dir > 0 && t.s > ln.len - 30) || (t.dir < 0 && t.s < 30)) { t.dir = -t.dir; t.v = 0; t.dwell = 8; t.nextSt = null; t.atSt = null; }
-    t.v += clamp(target - t.v, -1.4 * d, 1.0 * d);
-    t.s = clamp(t.s + t.v * t.dir * d, 0, ln.len);
-    t.atSt = null;
-    placeTrain(t);
-    // ground-level trains crossing the street will flatten you
-    if (!S.riding && !S.crashed && Math.abs(t.h) < 0.6 && t.v > 2) {
-      for (const cg of t.cars) {
-        const dx = S.x - cg.position.x, dz = S.z - cg.position.z, a = cg.rotation.y, lx = dx * Math.cos(a) - dz * Math.sin(a), lz = dx * Math.sin(a) + dz * Math.cos(a);
-        if (Math.abs(lx) < 1.6 && Math.abs(lz) < CAR_LEN / 2) { crash('Hit by a train', 'car', null, t.v + S.v); break; }
-      }
-    }
-  }
-}
-
-// ---------------------------------------------------------------- riding the train
-const RIDE = { on: false, train: null, prompt: '' };
-function stationNear(x, z, r) {
-  let best = null, bd = r;
-  for (const ln of MAP.lines) for (const st of ln.stations) {
-    const d = Math.min(Math.hypot(st.x - x, st.z - z), Math.hypot(st.px - x, st.pz - z));
-    if (d < bd) { bd = d; best = st; }
-  }
-  return best;
-}
-// Ends of the line a station's trains run to: +1 towards the last station, -1 towards the first
-function lineEnds(st) {
-  const ln = MAP.lines[st.line], first = ln.stations[0], last = ln.stations[ln.stations.length - 1];
-  return { plus: st === last || st.s > ln.len - 120 ? null : last, minus: st === first || st.s < 120 ? null : first };
-}
-function boardTrain(st, dir) {
-  const ln = MAP.lines[st.line], ends = lineEnds(st);
-  if (dir > 0 && !ends.plus) dir = -1;
-  if (dir < 0 && !ends.minus) dir = 1;
-  let t = trains.find((x) => x.on && x.line === ln.id && !x.mine && Math.abs(x.s - st.s) < 400) || trains.find((x) => !x.on) || trains[0];
-  Object.assign(t, { on: true, line: ln.id, s: st.s, dir, v: 0, dwell: 3, mine: true, nextSt: null, atSt: st, boardSt: st, departed: false });
-  t.g.visible = true; placeTrain(t);
-  RIDE.on = true; RIDE.train = t; S.riding = true; S.v = 0; S.thr = 0;
-  if (W.active) W = { active: false };
-  rig.root.visible = false;
-  popup(`${TRANSIT[cityKey] || 'Train'} to ${(dir > 0 ? ends.plus : ends.minus).name}`, 'place');
-  if (stars()) popup('Cops can’t follow you on here', 'good');
-  camSnap = true;
-}
-// You can get off once the train has left the station you boarded at
-const canLeave = (t) => t.atSt && t.dwell > 0 && (t.departed || t.atSt !== t.boardSt);
-function leaveTrain() {
-  const t = RIDE.train, st = t && t.atSt;
-  if (!st || !canLeave(t)) return;
-  RIDE.on = false; S.riding = false; t.mine = false; RIDE.train = null;
-  rig.root.visible = true;
-  placeOnRoad(st.x, st.z, Math.atan2(-(st.px - st.x), -(st.pz - st.z)) || 0, 0, false);
-  popup(st.name, 'place'); camSnap = true;
-}
-// At a stop: switch to the train going back the other way
-function reverseTrain() {
-  const t = RIDE.train; if (!t || !t.atSt || t.dwell <= 0) return;
-  const ends = lineEnds(t.atSt), dir = -t.dir, to = dir > 0 ? ends.plus : ends.minus;
-  if (!to) { popup('End of the line'); return; }
-  t.dir = dir; t.nextSt = null; t.dwell = Math.max(t.dwell, 3); t.boardSt = t.atSt; t.departed = false;
-  popup(`Now heading to ${to.name}`, 'place'); camSnap = true;
-}
-function updateRide(d) {
-  const prompt = $('#prompt');
-  if (S.riding && RIDE.train) {
-    const t = RIDE.train;
-    if (t.v > 1) t.departed = true;
-    linePoint(MAP.lines[t.line], t.s, TP);
-    S.x = t.x; S.z = t.z; S.v = t.v; S.psi = Math.atan2(TP.dx * t.dir, TP.dz * t.dir);
-    // nobody can see you on the train
-    unseenT += d * 2;
-    const ends = lineEnds(t.atSt || nextStation(t) || MAP.lines[t.line].stations[0]), to = (t.dir > 0 ? ends.plus : ends.minus) || { name: 'end of the line' };
-    prompt.hidden = false;
-    if (t.atSt && t.dwell > 0 && !canLeave(t)) prompt.innerHTML = `Departing to <b>${esc(to.name)}</b>…`;
-    else if (t.atSt && t.dwell > 0) {
-      const back = t.dir > 0 ? ends.minus : ends.plus;
-      prompt.innerHTML = `<kbd>E</kbd> Get off at <b>${esc(t.atSt.name)}</b>${back ? ` &nbsp; <kbd>F</kbd> Ride back to <b>${esc(back.name)}</b>` : ''}`;
-    } else { const ns = nextStation(t); prompt.innerHTML = `To <b>${esc(to.name)}</b> · next stop <b>${esc(ns ? ns.name : 'end of the line')}</b>`; }
-    return;
-  }
-  const st = !S.crashed && S.v < 4 ? stationNear(S.x, S.z, 40) : null;
-  RIDE.near = st;
-  if (st) {
-    const ends = lineEnds(st), opts = [];
-    if (ends.plus) opts.push(`<kbd>E</kbd> to <b>${esc(ends.plus.name)}</b>`);
-    if (ends.minus) opts.push(`<kbd>${ends.plus ? 'F' : 'E'}</kbd> to <b>${esc(ends.minus.name)}</b>`);
-    prompt.hidden = false; prompt.innerHTML = `${esc(st.name)} · ${opts.join(' &nbsp; ')}`;
-  } else prompt.hidden = true;
-}
-function trainCamera(dt) {
-  const t = RIDE.train, ln = MAP.lines[t.line];
-  const cab = pov === 'first' || pov === 'chest' || pov === 'bars';
-  if (cab) {
-    // driverless trains: sit right up at the front window
-    const f = linePoint(ln, t.s + t.dir * (CAR_LEN / 2 + 0.5), {}), a = linePoint(ln, t.s + t.dir * (CAR_LEN / 2 + 45), {});
-    camera.position.set(f.px, f.h + 2.35, f.pz); camera.up.set(0, 1, 0); camera.lookAt(a.px, a.h + 2.0, a.pz);
-    camera.fov += (80 - camera.fov) * Math.min(1, dt * 3);
-  } else {
-    // behind the last car
-    const back = t.cars.length * (CAR_LEN + CAR_GAP) - CAR_LEN / 2 + 18;
-    const b = linePoint(ln, t.s - t.dir * back, {});
-    const under = b.h < -2;
-    tmp.set(b.px, b.h + (under ? 3.4 : 5.2), b.pz);
-    camPos.lerp(tmp, camSnap ? 1 : 1 - Math.exp(-dt * 3));
-    lookAt.lerp(tmp2.set(t.x, t.h + 2, t.z), camSnap ? 1 : 1 - Math.exp(-dt * 5));
-    camera.position.copy(camPos); camera.up.set(0, 1, 0); camera.lookAt(lookAt);
-    camera.fov += (64 - camera.fov) * Math.min(1, dt * 3);
-  }
-  camera.updateProjectionMatrix(); camSnap = false;
-}

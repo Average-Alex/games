@@ -18,6 +18,23 @@ function mulberry(a) {
 const hash2 = (x, z, s = 0) => { let h = Math.imul(x | 0, 73856093) ^ Math.imul(z | 0, 19349663) ^ Math.imul(s | 0, 83492791); h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
 const pick = (r, arr) => arr[Math.floor(r() * arr.length)];
 
+// ---------------------------------------------------------------- colour management
+// Every colour in this game is written as an sRGB hex. Lighting maths needs linear light, and the screen wants sRGB
+// again: so colours are converted to linear as they're set, canvas textures are marked sRGB, and the renderer
+// outputs sRGB. (three r128 has no built-in colour management.) Reading a colour back (getStyle, getHex) gives sRGB.
+(() => {
+  const P = THREE.Color.prototype; if (P.__wcSRGB) return; P.__wcSRGB = true;
+  let depth = 0;
+  const wrapIn = (fn) => function (...a) { depth++; try { fn.apply(this, a); } finally { depth--; } if (depth === 0) this.convertSRGBToLinear(); return this; };
+  const tmpC = new THREE.Color();
+  const wrapOut = (fn) => function (...a) { const r = this.r, g = this.g, b = this.b; tmpC.r = r; tmpC.g = g; tmpC.b = b; tmpC.convertLinearToSRGB(); return fn.apply(tmpC, a); };
+  P.setHex = wrapIn(P.setHex); P.setStyle = wrapIn(P.setStyle); P.setHSL = wrapIn(P.setHSL);
+  P.getHex = wrapOut(P.getHex); P.getHexString = wrapOut(P.getHexString); P.getStyle = wrapOut(P.getStyle); P.getHSL = wrapOut(P.getHSL);
+  const CT = THREE.CanvasTexture;
+  THREE.CanvasTexture = function (...a) { const t = new CT(...a); t.encoding = THREE.sRGBEncoding; return t; };
+  THREE.CanvasTexture.prototype = CT.prototype;
+})();
+
 // ---------------------------------------------------------------- cities (look and feel; the streets come from the map files)
 const CITIES = {
   van: {
@@ -26,7 +43,7 @@ const CITIES = {
     skyTop: '#3f72ad', skyMid: '#a6c6dd', fog: '#bccdd8', fogNear: 70, fogFar: 520, sun: '#fff2d8', night: false,
     hemi: ['#dfe8ee', '#3d4a44', 0.95], dir: ['#fff0dc', 0.95], sunDir: [0.35, 0.45, 0.6],
     wx: { clear: 0.3, cloudy: 0.3, rain: 0.32, fog: 0.08 }, brick: 0.2,
-    land: { none: '#6b706c', yard: '#62775a', grass: '#4f7a4b', forest: '#2f5236', sand: '#b8ab8a', paved: '#7a7c7c', water: '#33505e' },
+    land: { none: '#6e716c', yard: '#5f6e4f', grass: '#55703f', forest: '#344a30', sand: '#b8ab8a', paved: '#7a7c7c', water: '#33505e' },
     road: '#34373b', concrete: '#5a5d60', walk: '#8f9496', path: '#9a9488',
     walls: { house: ['#d8d2c4', '#a9b5b8', '#6f7f86', '#c2b39b', '#e4e0d6', '#8d6e5a', '#53626b'], mid: ['#b9c3c6', '#8a959a', '#c8bfae', '#a59a8c', '#d5d3cc'], glass: ['#7fa3a8', '#5f8a96', '#9cb8bd', '#6c8f99', '#8fb0b8', '#4f6f7a'] },
     trees: 'pnw', backdrop: 'mountains', traffic: 26, cars: ['#e8e4dc', '#1f2226', '#9aa1a8', '#3c6e5a', '#2d4f7a', '#c7c9cb', '#6b1f24', '#2b2d30'],
@@ -39,7 +56,7 @@ const CITIES = {
     skyTop: '#33417f', skyMid: '#e9845f', fog: '#f1b07c', fogNear: 90, fogFar: 480, sun: '#ffd7a6', sunDir: [0.25, 0.14, 1], night: false,
     wx: { clear: 0.72, cloudy: 0.18, fog: 0.1 }, brick: 0.08,
     hemi: ['#ffd9b8', '#6a5444', 0.85], dir: ['#ffc58f', 1.05],
-    land: { none: '#8c806e', yard: '#7d8658', grass: '#6f8a45', forest: '#55663a', sand: '#c8b893', paved: '#968b7a', water: '#3f7f9e' },
+    land: { none: '#786e60', yard: '#6c7050', grass: '#62743e', forest: '#4e5836', sand: '#b0a07e', paved: '#807868', water: '#3f7f9e' },
     road: '#3b3a3f', concrete: '#8c8780', walk: '#b9ab93', path: '#b8a886',
     walls: { house: ['#ead8bb', '#dcbb9b', '#f2e4cb', '#c9ab8c', '#e7cfc0', '#f4efe6', '#b98c6e'], mid: ['#ead8bb', '#d9c3a5', '#cfc6bb', '#e3d5c2'], glass: ['#6e8ba3', '#8aa3b5', '#5a7690', '#a0b4c2'] },
     trees: 'palms', streetTrees: true, backdrop: 'hills', traffic: 30, cars: ['#e8e4dc', '#1f2226', '#9aa1a8', '#b3262e', '#2d4f7a', '#d9c7a1', '#f2f2f2', '#3b3f45'],
@@ -51,7 +68,7 @@ const CITIES = {
     blurb: 'Neon after midnight. Ride the Strip, jump on I-15, hit Fremont St.', swatch: 'linear-gradient(180deg,#0b0820,#3a1450 60%,#ff3d7f)',
     skyTop: '#07061a', skyMid: '#2a1240', fog: '#2b1640', fogNear: 70, fogFar: 460, sun: '#f4eedd', sunDir: [-0.4, 0.35, 1], night: true,
     wx: { clear: 0.9, cloudy: 0.06, rain: 0.04 }, brick: 0.03,
-    hemi: ['#6b5aa8', '#2a1a2e', 0.55], dir: ['#b9b4ff', 0.3],
+    hemi: ['#8a72c8', '#5a3a40', 1.05], dir: ['#c9c0ff', 0.32],
     land: { none: '#4a3f40', yard: '#4b4a3c', grass: '#3c5a3e', forest: '#2f4532', sand: '#6a5a4a', paved: '#4f4848', water: '#1f3250' },
     road: '#26252b', concrete: '#47454c', walk: '#5b5258', path: '#5f5650',
     walls: { house: ['#d9c3a5', '#c8b28f', '#e0d2bd', '#b9a38a'], mid: ['#e0c27a', '#c8c3d6', '#d9b7c9', '#9fa7b6'], glass: ['#7d6aa8', '#c9a14a', '#8a93a8', '#b07a9e', '#5e7fb0'] },
@@ -65,7 +82,7 @@ const CITIES = {
     skyTop: '#3a8fdc', skyMid: '#a8dcff', fog: '#cdeaff', fogNear: 100, fogFar: 500, sun: '#fff6d8', sunDir: [0.5, 0.55, 0.6], night: false,
     wx: { clear: 0.55, cloudy: 0.2, rain: 0.25 },
     hemi: ['#ffffff', '#a99c84', 0.78], dir: ['#fff3dc', 0.85],
-    land: { none: '#9d927b', yard: '#7f9a55', grass: '#729a48', forest: '#4c7438', sand: '#cdbf98', paved: '#9b9384', water: '#2f8fb4' },
+    land: { none: '#857c6a', yard: '#6e7e4a', grass: '#62803f', forest: '#466034', sand: '#b8aa86', paved: '#858072', water: '#2f8fb4' },
     road: '#46464b', concrete: '#8a867e', walk: '#c9bfae', path: '#c4b89e',
     walls: { house: ['#ffc7d6', '#b8f0dc', '#d9c8ff', '#fff0b8', '#a8e4f5', '#ffffff'], mid: ['#ffffff', '#ffd9e4', '#c9f2e6', '#fff3c9'], glass: ['#5fb3d0', '#7fc9e0', '#a8d8e8', '#4f9ac0'] },
     trees: 'palms', streetTrees: true, backdrop: 'none', traffic: 26, cars: ['#ffffff', '#ff8fb1', '#38c6d9', '#1f2226', '#f5d36b', '#9aa1a8'],
@@ -78,7 +95,7 @@ const CITIES = {
     skyTop: '#1e263d', skyMid: '#6c6b84', fog: '#7a7787', fogNear: 60, fogFar: 430, sun: '#ffcf96', sunDir: [0, 0.08, 1], night: false, dusk: true,
     wx: { clear: 0.45, cloudy: 0.3, rain: 0.2, fog: 0.05 }, brick: 0.55,
     hemi: ['#b9b6c9', '#3a3433', 0.8], dir: ['#ffb985', 0.65],
-    land: { none: '#5a5856', yard: '#5d6a4c', grass: '#5c7a48', forest: '#3f5a36', sand: '#a89c84', paved: '#64615e', water: '#2f4652' },
+    land: { none: '#5a5856', yard: '#5b6649', grass: '#566e42', forest: '#3d5234', sand: '#a89c84', paved: '#64615e', water: '#2f4652' },
     road: '#303034', concrete: '#6a6866', walk: '#8a8682', path: '#8c8478',
     walls: { house: ['#8c5a46', '#a0806a', '#7a4a3a', '#b8a48e', '#6f6a66'], mid: ['#8c7f73', '#6f6a66', '#a39484', '#9a6a52', '#b0a495'], glass: ['#5c6f80', '#6f8090', '#4a5866', '#8a96a0', '#3e4a55'] },
     trees: 'deciduous', backdrop: 'none', traffic: 34, cars: ['#f2c230', '#f2c230', '#f2c230', '#1f2226', '#9aa1a8', '#e8e4dc', '#2d4f7a'], taxi: true,
@@ -130,6 +147,31 @@ const BIKES = {
            power: 55000, mass: 147, vmax: 50, traction: 9.8, ka: 2.45, inertia: 1.55, grip: 1.12,
            R: 0.31, Rf: 0.31, L: 1.48, seat: 0.92, knobby: false, color: '#ff6a00', accent: '#1b1c20', frame: '#ff6a00', style: 'smc',
            engine: { idle: 1500, redline: 8800, gears: 6, curve: 'four', pipe: 82, muffle: 1500, cyl: 1 } },
+  // Street motorcycles: full fairings or naked roadsters, road tyres, heavier to lift but much faster
+  ninja250: { brand: 'Kawasaki', name: 'Ninja 250R', type: 'gas', street: true, stroke: 4, blurb: 'The first sport bike everyone learns on. Revvy little twin, light and easy.',
+           power: 24600, mass: 152, vmax: 47, traction: 9.4, ka: 2.55, inertia: 1.55, grip: 1.12,
+           R: 0.3, Rf: 0.29, L: 1.4, seat: 0.78, knobby: false, color: '#5fbf2a', accent: '#14151a', frame: '#1a1b1e', style: 'sport',
+           engine: { idle: 1300, redline: 13000, gears: 6, curve: 'four', pipe: 140, muffle: 1700, cyl: 2 } },
+  ninja400: { brand: 'Kawasaki', name: 'Ninja 400', type: 'gas', street: true, stroke: 4, blurb: 'The 250 grown up. More torque, sharper fairing, still easy to ride.',
+           power: 33400, mass: 160, vmax: 53, traction: 9.6, ka: 2.5, inertia: 1.6, grip: 1.14,
+           R: 0.3, Rf: 0.29, L: 1.37, seat: 0.79, knobby: false, color: '#62c21f', accent: '#1c1d21', frame: '#1c1d21', style: 'sport',
+           engine: { idle: 1300, redline: 12500, gears: 6, curve: 'four', pipe: 132, muffle: 1800, cyl: 2 } },
+  r3:    { brand: 'Yamaha', name: 'YZF-R3', type: 'gas', street: true, stroke: 4, blurb: 'Small twin with race-bike looks. Loves to be held at the top of the rev range.',
+           power: 30900, mass: 160, vmax: 50, traction: 9.5, ka: 2.5, inertia: 1.6, grip: 1.14,
+           R: 0.3, Rf: 0.29, L: 1.38, seat: 0.78, knobby: false, color: '#1f3fa8', accent: '#f2f2f2', frame: '#1a1b1e', style: 'sport',
+           engine: { idle: 1300, redline: 12500, gears: 6, curve: 'four', pipe: 128, muffle: 1900, cyl: 2 } },
+  duke390: { brand: 'KTM', name: '390 Duke', type: 'gas', street: true, stroke: 4, blurb: 'Light naked single. Punchy down low, the easiest street bike here to loop.',
+           power: 32000, mass: 150, vmax: 46, traction: 9.5, ka: 2.65, inertia: 1.45, grip: 1.12,
+           R: 0.3, Rf: 0.29, L: 1.36, seat: 0.82, knobby: false, color: '#ff6a00', accent: '#1b1c20', frame: '#ff6a00', style: 'naked',
+           engine: { idle: 1400, redline: 10500, gears: 6, curve: 'four', pipe: 90, muffle: 1600, cyl: 1 } },
+  z900:  { brand: 'Kawasaki', name: 'Z900', type: 'gas', street: true, stroke: 4, blurb: '125 hp inline four, no fairing. Power wheelies in first and second.',
+           power: 92000, mass: 210, vmax: 66, traction: 10.0, ka: 2.4, inertia: 1.85, grip: 1.16,
+           R: 0.31, Rf: 0.3, L: 1.45, seat: 0.8, knobby: false, color: '#2b2e33', accent: '#5fbf2a', frame: '#5fbf2a', style: 'naked',
+           engine: { idle: 1100, redline: 11000, gears: 6, curve: 'four', pipe: 70, muffle: 2400, cyl: 4 } },
+  cbr600: { brand: 'Honda', name: 'CBR600RR', type: 'gas', street: true, stroke: 4, blurb: 'Supersport screamer. 15,000 rpm, flat out past 250 km/h.',
+           power: 88000, mass: 194, vmax: 72, traction: 10.0, ka: 2.35, inertia: 1.9, grip: 1.18,
+           R: 0.31, Rf: 0.3, L: 1.38, seat: 0.82, knobby: false, color: '#c8102e', accent: '#f2f2f2', frame: '#1f3fa8', style: 'sport',
+           engine: { idle: 1300, redline: 15000, gears: 6, curve: 'four', pipe: 62, muffle: 2800, cyl: 4 } },
 };
 for (const b of Object.values(BIKES)) {
   const m = b.mass + 75; b.drag = b.power / m / (b.vmax ** 3);
@@ -168,10 +210,10 @@ let C = CITIES[cityKey];
 const canvas = $('#game'), stage = $('#stage');
 let renderer = null;
 try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true }); } catch (e) { renderer = null; }
-if (renderer) { renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.25; }
+if (renderer) { renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.82; renderer.outputEncoding = THREE.sRGBEncoding; renderer.physicallyCorrectLights = false; }
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog('#000', 50, 300);
-const camera = new THREE.PerspectiveCamera(70, 16 / 9, 0.08, 2500);
+scene.fog = new THREE.FogExp2('#000', 0.0003);
+const camera = new THREE.PerspectiveCamera(70, 16 / 9, 0.08, 60000);
 // Graphics: Ultra by default. A governor (play.js) then trades render resolution for frame rate to hold ~30 fps.
 const GOV = { pr: 1, ema: 16, t: 0, dropRadius: 0 };
 function maxPixelRatio() { return Math.min(devicePixelRatio || 1, quality === 'ultra' ? 2 : quality === 'high' ? 2 : quality === 'med' ? 1.5 : 1); }
@@ -195,31 +237,70 @@ function resize() {
   sizePost();
 }
 // ---- post-processing on Ultra: bloom on lights, neon and sun, a film-style grade with vignette, FXAA edges
+// The grade is a cinematic one: a filmic S-curve for deep shadows and bright highlights, cool shadows and warm
+// highlights (split toning), vibrance that lifts dull colours more than bright ones, a light sharpen for crisp detail,
+// a touch of colour fringing toward the corners like a real lens, fine film grain, and a vignette.
 const GradeShader = {
-  uniforms: { tDiffuse: { value: null }, vignette: { value: 0.32 }, saturation: { value: 1.1 }, contrast: { value: 1.06 }, warmth: { value: 0.02 } },
+  uniforms: {
+    tDiffuse: { value: null }, vignette: { value: 0.34 }, saturation: { value: 1.12 }, contrast: { value: 1.08 }, warmth: { value: 0.02 },
+    shadowTint: { value: new THREE.Color('#1e3a52') }, lightTint: { value: new THREE.Color('#ffd7a0') }, split: { value: 0.12 },
+    texel: { value: new THREE.Vector2(1 / 1280, 1 / 720) }, sharpen: { value: 0.28 }, fringe: { value: 0.0009 }, grain: { value: 0.022 }, time: { value: 0 },
+  },
   vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
   fragmentShader: [
-    'uniform sampler2D tDiffuse; uniform float vignette, saturation, contrast, warmth; varying vec2 vUv;',
+    'uniform sampler2D tDiffuse; uniform float vignette, saturation, contrast, warmth, split, sharpen, fringe, grain, time;',
+    'uniform vec3 shadowTint, lightTint; uniform vec2 texel; varying vec2 vUv;',
+    'float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }',
+    'vec3 toSRGB(vec3 c) { return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }',
     'void main() {',
+    '  vec2 d = vUv - 0.5; float r2 = dot(d, d);',
+    '  vec2 off = d * fringe * r2 * 8.0;',
     '  vec4 c = texture2D(tDiffuse, vUv);',
+    '  c.r = texture2D(tDiffuse, vUv + off).r; c.b = texture2D(tDiffuse, vUv - off).b;',
+    '  vec3 blur = (texture2D(tDiffuse, vUv + vec2(texel.x, 0.0)).rgb + texture2D(tDiffuse, vUv - vec2(texel.x, 0.0)).rgb + texture2D(tDiffuse, vUv + vec2(0.0, texel.y)).rgb + texture2D(tDiffuse, vUv - vec2(0.0, texel.y)).rgb) * 0.25;',
+    '  c.rgb = toSRGB(max(c.rgb, 0.0)); blur = toSRGB(max(blur, 0.0));',
+    '  c.rgb += (c.rgb - blur) * sharpen;',
     '  float l = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));',
-    '  c.rgb = mix(vec3(l), c.rgb, saturation);',
-    '  c.rgb = (c.rgb - 0.5) * contrast + 0.5;',
+    '  float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b)), sat = mx - mn;',
+    '  c.rgb = mix(vec3(l), c.rgb, saturation + (1.0 - sat) * 0.18);',
+    '  vec3 s = clamp(c.rgb, 0.0, 1.0); s = s * s * (3.0 - 2.0 * s);',
+    '  c.rgb = mix(c.rgb, s, clamp(contrast - 1.0, 0.0, 1.0) * 2.4);',
+    '  c.rgb = mix(c.rgb, c.rgb * shadowTint * 2.2, split * (1.0 - smoothstep(0.0, 0.45, l)));',
+    '  c.rgb = mix(c.rgb, c.rgb * lightTint * 1.15, split * smoothstep(0.5, 1.0, l));',
     '  c.rgb += vec3(warmth, warmth * 0.3, -warmth) * (1.0 - l);',
-    '  vec2 d = vUv - 0.5; c.rgb *= 1.0 - vignette * smoothstep(0.25, 0.85, length(d * vec2(1.25, 1.0)));',
+    '  c.rgb *= 1.0 - vignette * smoothstep(0.25, 0.85, length(d * vec2(1.25, 1.0)));',
+    '  c.rgb += (hash(vUv * 1000.0 + time) - 0.5) * grain;',
     '  gl_FragColor = vec4(clamp(c.rgb, 0.0, 1.0), c.a);',
     '}'].join('\n'),
 };
+// Per-city grade: cool and moody in Vancouver, golden in LA, neon in Vegas, bright pastel in Miami, steely at dusk in NYC
+const GRADE = {
+  van: { shadowTint: '#1d3a50', lightTint: '#ffe2bf', split: 0.14, saturation: 1.1, contrast: 1.1, warmth: 0.0 },
+  la: { shadowTint: '#2a2a55', lightTint: '#ffc98a', split: 0.18, saturation: 1.16, contrast: 1.1, warmth: 0.03 },
+  vegas: { shadowTint: '#1e1a4a', lightTint: '#ffb0d8', split: 0.16, saturation: 1.22, contrast: 1.12, warmth: 0.0 },
+  miami: { shadowTint: '#17465a', lightTint: '#ffe0b0', split: 0.14, saturation: 1.2, contrast: 1.09, warmth: 0.02 },
+  nyc: { shadowTint: '#1d2a44', lightTint: '#ffc48f', split: 0.16, saturation: 1.08, contrast: 1.12, warmth: 0.02 },
+};
+let gradePass = null;
 let composer = null, bloomPass = null, fxaaPass = null;
 function setupPost() {
   composer = null;
   if (!renderer || quality !== 'ultra' || !THREE.EffectComposer || !THREE.UnrealBloomPass) return;
   try {
-    composer = new THREE.EffectComposer(renderer);
+    // An offscreen target gets only 16-bit depth by default, far too coarse for a view that reaches 60 km (walls
+    // flicker through each other): give it a 24-bit depth texture. Colour in half float, so the linear image keeps
+    // its dark gradients (no banding in the sky) and its bright highlights for the bloom.
+    const sz = renderer.getDrawingBufferSize(new THREE.Vector2()), gl2 = renderer.capabilities.isWebGL2;
+    const rt = new THREE.WebGLRenderTarget(Math.max(1, sz.x), Math.max(1, sz.y), { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat,
+      type: gl2 || renderer.extensions.has('OES_texture_half_float') ? THREE.HalfFloatType : THREE.UnsignedByteType });
+    if (gl2 || renderer.extensions.has('WEBGL_depth_texture')) { rt.depthTexture = new THREE.DepthTexture(Math.max(1, sz.x), Math.max(1, sz.y)); rt.depthTexture.type = THREE.UnsignedIntType; }
+    composer = new THREE.EffectComposer(renderer, rt);
     composer.addPass(new THREE.RenderPass(scene, camera));
     bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(256, 256), 0.45, 0.55, 0.84);
     composer.addPass(bloomPass);
-    composer.addPass(new THREE.ShaderPass(GradeShader));
+    gradePass = new THREE.ShaderPass(GradeShader);
+    composer.addPass(gradePass);
+    applyGrade();
     fxaaPass = new THREE.ShaderPass(THREE.FXAAShader);
     composer.addPass(fxaaPass);
     sizePost();
@@ -230,10 +311,23 @@ function sizePost() {
   const w = Math.max(1, stage.clientWidth), h = Math.max(1, stage.clientHeight), pr = renderer.getPixelRatio();
   composer.setPixelRatio(pr); composer.setSize(w, h);
   bloomPass.resolution.set(w * pr / 2, h * pr / 2);
+  if (gradePass) gradePass.uniforms.texel.value.set(1 / (w * pr), 1 / (h * pr));
   fxaaPass.material.uniforms.resolution.value.set(1 / (w * pr), 1 / (h * pr));
 }
+function applyGrade() {
+  if (!gradePass) return;
+  const g = GRADE[cityKey] || GRADE.van, u = gradePass.uniforms;
+  u.shadowTint.value.set(g.shadowTint).convertLinearToSRGB(); u.lightTint.value.set(g.lightTint).convertLinearToSRGB();
+  u.split.value = g.split; u.saturation.value = g.saturation; u.contrast.value = g.contrast; u.warmth.value = g.warmth;
+}
 function renderScene() {
-  if (composer) { bloomPass.strength = C.night ? 0.9 : C.dusk ? 0.6 : 0.35 + 0.15 * WX.wet; composer.render(); }
+  if (gradePass) {
+    const u = gradePass.uniforms; u.time.value = (u.time.value + 0.37) % 100;
+    // grey weather flattens the light: less split toning and contrast under cloud, rain and fog
+    const g = GRADE[cityKey] || GRADE.van, dull = Math.max(WX.cloud * 0.6, WX.rain, WX.fog);
+    u.split.value = g.split * (1 - 0.5 * dull); u.contrast.value = 1 + (g.contrast - 1) * (1 - 0.4 * dull);
+  }
+  if (composer) { bloomPass.strength = C.night ? 0.9 : C.dusk ? 0.6 : 0.4 + 0.15 * WX.wet; composer.render(); }
   else renderer.render(scene, camera);
 }
 // Hold the frame rate: lower the render resolution when frames run long, raise it when there's headroom,
@@ -329,56 +423,112 @@ class GeoBuf {
   }
 }
 
-// ---------------------------------------------------------------- sky, lights, backdrop, rain
-const sky = (() => {
-  const g = new THREE.SphereGeometry(1800, 32, 16);
-  g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 3), 3));
-  const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false, toneMapped: false }));
-  m.renderOrder = -10; scene.add(m); return m;
-})();
+// ---------------------------------------------------------------- sky, lights, haze, rain
+// The sky is a real photographed sky (Poly Haven HDRIs, tone mapped to JPEG by tools/fetch_assets.py): the city's own
+// sky blended with overcast, storm and mist skies as the weather turns. Light comes from the photo's own sun, turned to
+// the city's sun bearing so streets keep the light they were designed with.
+const SKY = { img: {}, meta: null, horizon: {}, rot: 0, ready: false };
+const SUN = new THREE.Vector3(0.45, 0.55, 0.7).normalize();
+const SKY_FOR = { van: 'clear_van', la: 'sunset_la', vegas: 'night_vegas', miami: 'clear_miami', nyc: 'dusk_nyc' };
+const skyMat = new THREE.ShaderMaterial({
+  uniforms: {
+    tBase: { value: null }, tCloud: { value: null }, tStorm: { value: null }, tMist: { value: null },
+    wCloud: { value: 0 }, wStorm: { value: 0 }, wMist: { value: 0 }, rotBase: { value: 0 }, dimWx: { value: 1 }, gain: { value: 1 }, has: { value: 0 },
+    top: { value: new THREE.Color('#3f72ad') }, mid: { value: new THREE.Color('#a6c6dd') }, fogc: { value: new THREE.Color('#bccdd8') },
+    sunDir: { value: SUN }, sunCol: { value: new THREE.Color('#fff2d8') }, sunK: { value: 1 }, haze: { value: 0 },
+  },
+  vertexShader: 'varying vec3 vDir; void main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: [
+    'uniform sampler2D tBase, tCloud, tStorm, tMist; uniform float wCloud, wStorm, wMist, rotBase, dimWx, gain, has, sunK, haze;',
+    'uniform vec3 top, mid, fogc, sunDir, sunCol; varying vec3 vDir;',
+    'vec3 eq(sampler2D t, vec3 d, float rot) {',
+    '  float a = atan(d.z, d.x) + rot;',
+    '  vec2 uv = vec2(fract(a * 0.15915494 + 0.5), asin(clamp(d.y, -1.0, 1.0)) * 0.31830989 + 0.5);',
+    '  vec3 c = texture2D(t, uv).rgb; return c * c * (c * 0.3 + 0.7);',          // ~sRGB to linear
+    '}',
+    'void main() {',
+    '  vec3 d = normalize(vDir), dd = normalize(vec3(d.x, max(d.y, 0.012), d.z)), c;',
+    '  if (has > 0.5) {',
+    '    c = min(eq(tBase, dd, rotBase), vec3(0.82)) * gain;',
+    '    if (wCloud > 0.002) c = mix(c, min(eq(tCloud, dd, rotBase), vec3(0.82)) * dimWx, wCloud);',
+    '    if (wStorm > 0.002) c = mix(c, eq(tStorm, dd, rotBase + 1.3) * dimWx, wStorm);',
+    '    if (wMist > 0.002) c = mix(c, eq(tMist, dd, rotBase) * dimWx, wMist);',
+    '  } else {',
+    '    float y = max(d.y, 0.0); c = y > 0.2 ? mix(mid, top, pow(min(1.0, (y - 0.2) / 0.6), 0.8)) : mix(fogc, mid, y / 0.2);',
+    '  }',
+    '  float hz = pow(1.0 - clamp(d.y, 0.0, 1.0), 5.0);',
+    '  c = mix(c, fogc, clamp(haze * hz, 0.0, 1.0));',
+    '  if (d.y < 0.0) c = mix(c, fogc, clamp(-d.y * 6.0, 0.0, 1.0));',
+    '  float s = max(dot(d, sunDir), 0.0);',
+    '  c += sunCol * sunK * (pow(s, 2400.0) * 3.0 + pow(s, 120.0) * 0.06);',
+    '  gl_FragColor = linearToOutputTexel(vec4(c, 1.0));',
+    '}'].join('\n'),
+  side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false, toneMapped: false,
+});
+const sky = new THREE.Mesh(new THREE.SphereGeometry(1800, 48, 24), skyMat);
+sky.renderOrder = -10; sky.frustumCulled = false; scene.add(sky);
 // Reflections: a blurred environment map rendered from the current sky, used by every physically based material
 const envScene = new THREE.Scene();
-envScene.add(new THREE.Mesh(sky.geometry, sky.material));
+envScene.add(new THREE.Mesh(sky.geometry, skyMat));
 const pmrem = renderer ? new THREE.PMREMGenerator(renderer) : null;
 let envRT = null;
 function updateEnv() {
   if (!pmrem || quality === 'low') { scene.environment = null; return; }
-  const rt = pmrem.fromScene(envScene, 0.04, 1, 4000);
+  const rt = pmrem.fromScene(envScene, 0.02, 1, 4000);
   if (envRT) envRT.dispose();
   envRT = rt; scene.environment = rt.texture;
 }
-// Clouds: soft billboards on the sky dome, thicker and greyer as the weather turns
-const clouds = (() => {
-  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 128;
-  const g = cv.getContext('2d'), r = mulberry(77);
-  for (let i = 0; i < 26; i++) {
-    const x = 40 + r() * 176, y = 50 + r() * 40, rad = 18 + r() * 34;
-    const grd = g.createRadialGradient(x, y, 0, x, y, rad); grd.addColorStop(0, 'rgba(255,255,255,.55)'); grd.addColorStop(1, 'rgba(255,255,255,0)');
-    g.fillStyle = grd; g.fillRect(0, 0, 256, 128);
-  }
-  const tex = new THREE.CanvasTexture(cv);
-  const grp = new THREE.Group(), mats = [];
-  for (let i = 0; i < 16; i++) {
-    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: false, opacity: 0.6 });
-    const s = new THREE.Sprite(mat), a = (i / 16) * TAU + r() * 0.3, d = 1300 + r() * 250;
-    s.position.set(Math.sin(a) * d, 260 + r() * 260, Math.cos(a) * d); s.scale.set(700 + r() * 500, 220 + r() * 120, 1); s.renderOrder = -9;
-    grp.add(s); mats.push(mat);
-  }
-  scene.add(grp);
-  return { grp, mats };
-})();
-const sun = new THREE.Mesh(new THREE.CircleGeometry(60, 32), new THREE.MeshBasicMaterial({ color: '#fff', fog: false, depthWrite: false }));
-sun.renderOrder = -9; scene.add(sun);
+// (the photographed skies have their own clouds; kept as an empty group so camera-following code still works)
+const clouds = { grp: new THREE.Group(), mats: [] };
+const sun = new THREE.Object3D();
 const hemi = new THREE.HemisphereLight('#fff', '#444', 1); scene.add(hemi);
 const dirL = new THREE.DirectionalLight('#fff', 1); scene.add(dirL); scene.add(dirL.target);
 dirL.shadow.camera.left = -45; dirL.shadow.camera.right = 45; dirL.shadow.camera.top = 45; dirL.shadow.camera.bottom = -45;
-dirL.shadow.camera.near = 1; dirL.shadow.camera.far = 260; dirL.shadow.bias = -0.0006; dirL.shadow.normalBias = 0.03;
+dirL.shadow.camera.near = 1; dirL.shadow.camera.far = 320; dirL.shadow.bias = -0.0005; dirL.shadow.normalBias = 0.04;
 const headlight = new THREE.SpotLight('#fff2d6', 0, 70, 0.5, 0.5, 1.4); scene.add(headlight); scene.add(headlight.target);
-// Far filler under everything (beyond the streamed tiles)
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(5000, 5000).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: '#777' }));
+// Far filler under everything: real satellite imagery of the city (world.js); a plain colour until it loads
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(5000, 5000, 20, 20).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: '#777' }));
 ground.position.y = -0.25; scene.add(ground);
 const backdrop = new THREE.Group(); scene.add(backdrop);
 let rain = null;
+// How far you can see (FogExp2 density) in clear air, per city: Vancouver's air is clean, LA's hazy
+const SKY_GAIN = { van: 1, la: 0.92, vegas: 0.13, miami: 1, nyc: 0.5 };
+const VIS = { van: 0.00016, la: 0.00028, vegas: 0.0002, miami: 0.00017, nyc: 0.00024 };
+
+// load the city's skies (and the shared weather skies) as images; average each one's horizon for the haze colour
+function loadSkies(key) {
+  const names = [SKY_FOR[key], 'cloudy', 'storm', 'mist'];
+  const meta = SKY.meta ? Promise.resolve(SKY.meta) : fetch('wheelie-city/assets/sky/sky.json').then((r) => r.json()).catch(() => ({})).then((m) => (SKY.meta = m));
+  // (sky.json first: it carries the horizon colours, so the images needn't be read back)
+  return meta.then(() => Promise.all(names.map((n) => SKY.img[n] ? Promise.resolve(SKY.img[n]) : new Promise((res) => {
+    new THREE.TextureLoader().load(`wheelie-city/assets/sky/${n}.jpg`, (t) => {
+      t.minFilter = THREE.LinearFilter; t.generateMipmaps = false; t.wrapS = THREE.RepeatWrapping;
+      // horizon colour: average a band just above the horizon all the way round (worked out offline when it can be)
+      const hz = SKY.meta && SKY.meta[n] && SKY.meta[n].horizon;
+      if (hz) { SKY.horizon[n] = new THREE.Color().setRGB(hz[0], hz[1], hz[2]).convertSRGBToLinear(); SKY.img[n] = t; res(t); return; }
+      try {
+        const im = t.image, cv = document.createElement('canvas'); cv.width = 64; cv.height = 32;
+        const g = cv.getContext('2d'); g.drawImage(im, 0, 0, 64, 32);
+        const d = g.getImageData(0, 13, 64, 3).data; let r = 0, gg = 0, b = 0;
+        for (let i = 0; i < d.length; i += 4) { r += d[i]; gg += d[i + 1]; b += d[i + 2]; }
+        const n2 = d.length / 4; SKY.horizon[n] = new THREE.Color().setRGB(r / n2 / 255, gg / n2 / 255, b / n2 / 255).convertSRGBToLinear();
+      } catch { SKY.horizon[n] = new THREE.Color('#9aa2a8'); }
+      SKY.img[n] = t; res(t);
+    }, undefined, () => res(null));
+  }))));
+}
+function setupSun() {
+  // turn the photographed sky so its sun sits on the city's own sun bearing; light comes from there
+  const m = SKY.meta && SKY.meta[SKY_FOR[cityKey]], sd = C.sunDir || [0, 0.3, 1];
+  const azC = Math.atan2(sd[2], sd[0]);
+  if (m && m.sun) {
+    const [sx, sy, sz] = m.sun, azS = Math.atan2(sz, sx), el = Math.asin(clamp(sy, -1, 1));
+    SKY.rot = azS - azC;
+    SUN.set(Math.cos(azC) * Math.cos(el), Math.sin(el), Math.sin(azC) * Math.cos(el)).normalize();
+  } else { SKY.rot = 0; SUN.set(sd[0], sd[1], sd[2]).normalize(); }
+  // night: the "sun" in the Vegas sky is the moon, high up: keep the moonlight but at the city's bearing
+  if (C.night) SUN.set(Math.cos(azC) * 0.55, 0.8, Math.sin(azC) * 0.55).normalize();
+}
 
 // ---------------------------------------------------------------- weather: clear, cloudy, rain, fog, blending over ~25 s
 const WX = { mode: store.get('wc-weather', 'auto'), from: 'clear', to: 'clear', t: 1, timer: 200, cloud: 0, rain: 0, fog: 0, wet: 0, skyT: 0 };
@@ -409,7 +559,7 @@ function updateWeather(dt, announce) {
   if (WX.t < 1) WX.t = Math.min(1, WX.t + dt / 25);
   applyWeather(dt, false);
 }
-const wxC = { top: new THREE.Color(), mid: new THREE.Color(), fog: new THREE.Color(), tmp: new THREE.Color() };
+const wxC = { top: new THREE.Color(), mid: new THREE.Color(), fog: new THREE.Color(), tmp: new THREE.Color(), hz: new THREE.Color() };
 function applyWeather(dt, force) {
   const a = WX_LOOK[WX.from], b = WX_LOOK[WX.to], k = smooth(0, 1, WX.t);
   WX.cloud = lerp(a.cloud, b.cloud, k); WX.rain = lerp(a.rain, b.rain, k); WX.fog = lerp(a.fog, b.fog, k);
@@ -419,65 +569,56 @@ function applyWeather(dt, force) {
   WX.skyT = 0.2;
   const refreshEnv = force || (WX.t < 1 && WX.envT <= 0);
   if (refreshEnv) WX.envT = 3;
-  const dark = C.night ? 0.3 : C.dusk ? 0.6 : 1;
+  const dark = C.night ? 0.09 : C.dusk ? 0.5 : 1;
   const grey = (hex) => wxC.tmp.set(hex).multiplyScalar(dark);
-  wxC.top.set(C.skyTop).lerp(grey('#6c747c'), WX.cloud * 0.85).lerp(grey('#4b545c'), WX.rain * 0.7).lerp(grey('#b9bec2'), WX.fog * 0.75);
-  wxC.mid.set(C.skyMid).lerp(grey('#9aa2a8'), WX.cloud * 0.8).lerp(grey('#78838a'), WX.rain * 0.7).lerp(grey('#c3c8cb'), WX.fog * 0.8);
-  wxC.fog.set(C.fog).lerp(grey('#a8afb4'), WX.cloud * 0.6).lerp(grey('#87939a'), WX.rain * 0.7).lerp(grey('#c6cacd'), WX.fog * 0.85);
-  const pos = sky.geometry.attributes.position, col = sky.geometry.attributes.color, c = wxC.tmp;
-  for (let i = 0; i < pos.count; i++) {
-    const y = pos.getY(i) / 1800;
-    if (y > 0.2) c.copy(wxC.mid).lerp(wxC.top, Math.min(1, (y - 0.2) / 0.6)); else if (y > 0) c.copy(wxC.fog).lerp(wxC.mid, y / 0.2); else c.copy(wxC.fog);
-    col.setXYZ(i, c.r, c.g, c.b);
+  // weights of the weather skies: overcast with cloud, the storm sky with rain, mist with fog
+  const wStorm = clamp(WX.rain, 0, 1), wMist = clamp(WX.fog * 1.1, 0, 1), wCloud = clamp(WX.cloud * 1.15 - wStorm * 0.3, 0, 1);
+  const u = skyMat.uniforms, base = SKY_FOR[cityKey];
+  const have = SKY.img[base] && SKY.img.cloudy && SKY.img.storm && SKY.img.mist;
+  u.has.value = have ? 1 : 0;
+  if (have) { u.tBase.value = SKY.img[base]; u.tCloud.value = SKY.img.cloudy; u.tStorm.value = SKY.img.storm; u.tMist.value = SKY.img.mist; }
+  u.wCloud.value = wCloud; u.wStorm.value = wStorm; u.wMist.value = wMist; u.rotBase.value = SKY.rot; u.dimWx.value = dark;
+  // the photos were all exposed for daylight: bring the night and dusk skies down to their real brightness
+  u.gain.value = SKY_GAIN[cityKey] || 1;
+  // haze colour: the horizon of whichever skies are showing
+  if (have && SKY.horizon[base]) {
+    wxC.hz.copy(SKY.horizon[base]).multiplyScalar(u.gain.value);
+    wxC.hz.lerp(wxC.tmp.copy(SKY.horizon.cloudy).multiplyScalar(dark), wCloud).lerp(wxC.tmp.copy(SKY.horizon.storm).multiplyScalar(dark), wStorm).lerp(wxC.tmp.copy(SKY.horizon.mist).multiplyScalar(dark), wMist);
+    wxC.fog.copy(wxC.hz);
+  } else {
+    wxC.fog.set(C.fog).lerp(grey('#a8afb4'), WX.cloud * 0.6).lerp(grey('#87939a'), WX.rain * 0.7).lerp(grey('#c6cacd'), WX.fog * 0.85);
   }
-  col.needsUpdate = true;
+  wxC.top.set(C.skyTop).lerp(grey('#6c747c'), WX.cloud * 0.85).lerp(grey('#4b545c'), WX.rain * 0.7);
+  wxC.mid.set(C.skyMid).lerp(grey('#9aa2a8'), WX.cloud * 0.8).lerp(grey('#78838a'), WX.rain * 0.7);
+  u.top.value.copy(wxC.top); u.mid.value.copy(wxC.mid); u.fogc.value.copy(wxC.fog);
+  u.haze.value = clamp(WX.rain * 0.5 + WX.fog * 0.9, 0, 1);
+  u.sunDir.value.copy(SUN); u.sunCol.value.set(C.sun || '#ffffff');
+  u.sunK.value = C.sun && !C.night ? clamp(1 - WX.cloud * 1.2 - WX.fog * 1.4, 0, 1) : 0;
   if (refreshEnv) updateEnv();
   scene.fog.color.copy(wxC.fog);
-  scene.fog.near = C.fogNear * (1 - 0.7 * WX.fog);
-  scene.fog.far = C.fogFar * (quality === 'low' ? 0.75 : quality === 'ultra' ? 1.55 : quality === 'high' ? 1.25 : 1) * (1 - 0.15 * WX.cloud - 0.3 * WX.rain - 0.6 * WX.fog);
+  const vis = (VIS[cityKey] || 0.0002) * (quality === 'low' ? 1.8 : quality === 'med' ? 1.3 : 1);
+  scene.fog.density = vis * (1 + 0.5 * WX.cloud) * (1 + 3.5 * WX.rain) * (1 + 22 * WX.fog * WX.fog);
   if (renderer) renderer.setClearColor(wxC.fog);
-  sun.visible = !!C.sun && WX.cloud < 0.6 && WX.fog < 0.6;
-  if (C.sun) { sun.material.color.set(C.sun); sun.material.transparent = true; sun.material.opacity = clamp(1 - WX.cloud * 1.6 - WX.fog * 1.6, 0, 1); }
-  hemi.intensity = C.hemi[2] * (1 - 0.12 * WX.cloud);
-  dirL.intensity = C.dir[1] * (1 - 0.6 * WX.cloud) * (1 - 0.25 * WX.fog);
+  const sunK = 1 - 0.65 * WX.cloud - 0.25 * WX.fog;
+  hemi.intensity = C.hemi[2] * 0.7 * (1 - 0.1 * WX.cloud);
+  dirL.intensity = C.dir[1] * 1.15 * sunK;
   headlight.intensity = C.night || C.dusk ? 2.2 : 1.1 * Math.max(WX.rain, WX.fog, WX.cloud * 0.4);
   if (rain) { rain.visible = WX.rain > 0.03; rain.material.opacity = 0.42 * WX.rain; }
-  const cc = wxC.tmp.set('#ffffff').lerp(grey('#7d868c'), WX.rain * 0.8 + WX.cloud * 0.3).multiplyScalar(C.night ? 0.25 : C.dusk ? 0.75 : 1);
-  clouds.mats.forEach((mt, i) => { mt.color.copy(cc); mt.opacity = clamp((i % 3 === 0 ? 0.35 : 0.55) + WX.cloud * 0.5, 0, 1) * (1 - WX.fog * 0.9); });
-  if (typeof MM !== 'undefined' && MM.road) { MM.road.roughness = lerp(0.93, 0.32, WX.wet); MM.road.metalness = 0.14 * WX.wet; }
+  if (typeof MM !== 'undefined' && MM.road) applyWetness();
+  if (typeof updateTerrainLook === 'function') updateTerrainLook();
 }
 function setupSky() {
+  applyGrade();
+  setupSun();
   hemi.color.set(C.hemi[0]); hemi.groundColor.set(C.hemi[1]);
   dirL.color.set(C.dir[0]);
   ground.material.color.set(C.land.none);
-  buildBackdrop(); setupRain(); setupWeather();
+  setupRain(); setupWeather();
 }
-function buildBackdrop() {
-  while (backdrop.children.length) { const m = backdrop.children.pop(); m.geometry.dispose(); m.material.dispose(); }
-  const fog = new THREE.Color(C.fog);
-  const haze = (c, t) => new THREE.MeshBasicMaterial({ color: new THREE.Color(c).lerp(fog, t), fog: false });
-  const r = mulberry(99);
-  const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.renderOrder = -8; backdrop.add(m); return m; };
-  if (C.backdrop === 'hills' || C.backdrop === 'desert' || C.backdrop === 'mountains') {
-    const base = C.backdrop === 'hills' ? '#7d6a5c' : C.backdrop === 'desert' ? '#3a2b3e' : '#4a5a63';
-    for (let i = 0; i < 44; i++) {
-      // Vancouver: the North Shore mountains sit to the north; elsewhere hills all round
-      let a = (i / 44) * TAU;
-      if (C.backdrop === 'mountains') a = -1.2 + (i / 44) * 2.4;
-      const dist = 1350 + r() * 250;
-      const h = C.backdrop === 'mountains' ? 260 + r() * 330 : 90 + r() * 140, w = 260 + r() * 300;
-      const g = new THREE.ConeGeometry(w, h, 5 + Math.floor(r() * 3), 1); g.translate(0, h / 2, 0);
-      add(g, haze(base, 0.35 + r() * 0.2), Math.sin(a) * dist, -20, Math.cos(a) * dist);
-      if (C.backdrop === 'mountains') {
-        const cap = new THREE.ConeGeometry(w * 0.3, h * 0.3, 6, 1); cap.translate(0, h - h * 0.15, 0);
-        add(cap, haze('#eef3f5', 0.3), Math.sin(a) * dist, -19, Math.cos(a) * dist);
-      }
-    }
-  }
-}
+function buildBackdrop() { /* replaced by the real terrain in world.js */ }
 function setupRain() {
   if (rain) { scene.remove(rain); rain.geometry.dispose(); rain.material.dispose(); rain = null; }
-  const N = 1100, pos = new Float32Array(N * 6), r = mulberry(5);
+  const N = 1400, pos = new Float32Array(N * 6), r = mulberry(5);
   for (let i = 0; i < N; i++) {
     const x = (r() - 0.5) * 60, y = r() * 30, z = (r() - 0.5) * 60;
     pos.set([x, y, z, x + 0.05, y + 0.8, z - 0.15], i * 6);
@@ -540,13 +681,26 @@ const detailTex = (() => {
   const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping;
   return t;
 })();
+let GRASS_AVG = null;
 function addGroundDetail(mat) {
+  // green ground (parks, lawns, forest floor) gets the photographed grass, normalised to its average colour so the
+  // landcover colour still decides the shade; everything else gets fine noise
+  const grass = typeof TEX !== 'undefined' && TEX.grass_c;
+  if (grass && !GRASS_AVG) GRASS_AVG = texAverage(grass);
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.detailMap = { value: detailTex };
+    sh.uniforms.grassMap = { value: grass || detailTex }; sh.uniforms.grassAvg = { value: GRASS_AVG || new THREE.Color(0.5, 0.5, 0.5) }; sh.uniforms.hasGrass = { value: grass ? 1 : 0 };
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec2 vDetUV;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvDetUV = (modelMatrix * vec4(transformed, 1.0)).xz;');
-    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D detailMap;\nvarying vec2 vDetUV;')
-      .replace('#include <map_fragment>', '#include <map_fragment>\nfloat dFine = texture2D(detailMap, vDetUV * 0.45).r, dBig = texture2D(detailMap, vDetUV * 0.012).g;\ndiffuseColor.rgb *= (0.72 + 0.56 * dFine) * (0.85 + 0.3 * dBig);');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D detailMap, grassMap; uniform vec3 grassAvg; uniform float hasGrass;\nvarying vec2 vDetUV;')
+      .replace('#include <map_fragment>', [
+        '#include <map_fragment>',
+        'float dFine = texture2D(detailMap, vDetUV * 0.45).r, dBig = texture2D(detailMap, vDetUV * 0.012).g;',
+        'vec3 noiseCol = diffuseColor.rgb * (0.72 + 0.56 * dFine) * (0.85 + 0.3 * dBig);',
+        'vec3 gt = texture2D(grassMap, vDetUV / 3.0).rgb; gt = gt * gt * (gt * 0.3 + 0.7);',
+        'vec3 grassCol = diffuseColor.rgb * gt / max(grassAvg, vec3(0.01)) * (0.85 + 0.3 * dBig);',
+        'float green = hasGrass * smoothstep(0.0, 0.03, diffuseColor.g - max(diffuseColor.r, diffuseColor.b) * 0.9);',
+        'diffuseColor.rgb = mix(noiseCol, grassCol, green);'].join('\n'));
   };
   mat.customProgramCacheKey = () => 'ground-detail';
   return mat;
