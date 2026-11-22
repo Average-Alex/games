@@ -240,7 +240,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyV' && state === 'play' && (WALK.on || (S.riding && RIDE.train))) { transitKey('KeyV'); }
   else if (e.code === 'KeyV' && state === 'play') { const i = POVS.findIndex((p) => p[0] === pov); setPov(POVS[(i + 1) % POVS.length][0]); popup(POVS[(i + 1) % POVS.length][1]); }
   if (state === 'play') {
-    if (e.code === 'Space' && !S.crashed && S.theta < 0.45 && S.popCd <= 0 && S.v > 1.5) {
+    if (e.code === 'Space' && !S.crashed && S.theta < 0.45 && S.popCd <= 0 && S.v > 1.5 && !BIKES[bikeKey].car) {   // (in a car Space is the handbrake)
       const B = BIKES[bikeKey];
       let kick = 1.3;
       if (B.type === 'gas') { const f = S.rpm / B.engine.redline; kick = 0.8 + 1.4 * f; S.clutchDump = 1; }
@@ -333,6 +333,68 @@ function burnoutStep(B, d) {
     const o = tyres[Math.floor(Math.random() * tyres.length)];
     spawnSmoke(S.x + rx * o - fx * 0.25, S.y + 0.25, S.z + rz * o - fz * 0.25, -fx * 2.5 + rx * Math.sign(o) * 1.2, -fz * 2.5 + rz * Math.sign(o) * 1.2, paved ? 0.8 : 0.5);
   }
+}
+// ---- drifting (cars): the nose (psi) and the direction of travel (psi - beta) part company. The handbrake (Space),
+// or the throttle in a rear-drive car mid-corner, or simply arriving too fast, swings the tail out; the throttle
+// holds it out, steering against the slide (countersteer) and the tyres pull it back; too far and it spins.
+// Turning right makes psi smaller; in a right-hand drift the nose points further right than the path (beta < 0).
+function carDrift(B, d, steerIn, grip, turnRate) {
+  const hb = keys.has('Space'), rwd = !B.awd, v = S.v;
+  S.beta = S.beta || 0;
+  const pw = Math.min(1.6, B.power / B.mass / 200);             // power to weight (Hellcat 1.3, Huracán 1.6, R34 0.8)
+  if (!S.drifting && v > 7) {
+    const powerOver = rwd && S.thr > 0.85 && Math.abs(steerIn) > 0.4 && S.gear <= 3 && pw > 0.7;
+    const tooFast = Math.abs(v * turnRate) > grip * G * 1.15;
+    if ((hb && Math.abs(steerIn) > 0.2) || powerOver || tooFast) {
+      S.drifting = true; S.driftDir = Math.sign(steerIn) || Math.sign(turnRate) || 1; S.driftT = 0; S.driftPts = 0;
+      S.beta = -S.driftDir * 0.12;
+      S.driftCombo = simTime - (S.driftEnd ?? -9) < 2.5 ? (S.driftCombo || 1) + 1 : 1;
+      popup(S.driftCombo > 1 ? `Drift x${S.driftCombo}` : 'Drift', '');
+    }
+  }
+  if (!S.drifting) {
+    S.beta *= Math.exp(-d * 8);
+    S.psi -= turnRate * d;
+    if (hb && v > 1) { S.v *= Math.exp(-d * 1.2); S.skid = Math.max(S.skid, 0.2); }      // handbrake in a straight line
+    return turnRate;
+  }
+  const dir = S.driftDir;
+  let b = -S.beta * dir;                                            // the drift angle (positive)
+  const counter = -steerIn * dir;                                   // > 0: steering against the slide
+  // (the handbrake swings the tail hardest at low speed: a flick at 150 km/h is a twitch, not a pirouette)
+  const push = (hb ? 1.5 / (1 + v / 25) : 0) + S.thr * pw * (rwd ? 1.5 : 0.7) + Math.max(0, -counter) * 0.8;
+  const pull = 1.1 + grip * 0.6 + Math.max(0, counter) * 2.2;
+  b += (push * (1 - Math.min(1, b / 1.3) * 0.5) - pull * b) * d;
+  if (b > 1.45) {
+    // too far round: it spins and the drift is lost
+    popup('Spun out', 'bad'); S.v *= 0.3; S.psi -= dir * 0.6; S.beta = 0; S.drifting = false; S.driftEnd = -9; S.driftPts = 0;
+    return 0;
+  }
+  b = Math.max(0, b);
+  S.beta = -dir * b;
+  // it still carves round the corner: the tyres turn its path, harder the further it hangs out
+  const lat = grip * G * (0.55 + 0.45 * Math.min(1, b / 0.5));
+  const courseRate = dir * Math.min(lat / Math.max(3, v), 1.6) * Math.min(1, b / 0.15) + turnRate * 0.25;
+  const chi = S.psi - S.beta - courseRate * d;
+  S.psi = chi + S.beta;
+  // sliding scrubs speed (the handbrake more), screeches and smokes, and lays two lines of rubber
+  S.v *= Math.exp(-d * (Math.sin(b) * 0.3 + (hb ? 0.35 : 0)));
+  S.skid = Math.max(S.skid, Math.min(0.45, 0.15 + b * 0.5));
+  const paved = S.surface === 'road' || S.surface === 'pave';
+  S.driftSmoke = (S.driftSmoke || 0) + d * b * (paved ? 45 : 15);
+  const fx = Math.sin(S.psi), fz = Math.cos(S.psi), rx = -fz, rz = fx, o = B.W / 2 - 0.13;
+  while (S.driftSmoke >= 1) { S.driftSmoke -= 1; const s = Math.random() < 0.5 ? 1 : -1; spawnSmoke(S.x + rx * o * s, S.y + 0.25, S.z + rz * o * s, -fx * 1.5 + rx * s, -fz * 1.5 + rz * s, paved ? 0.8 : 0.5); }
+  // points: how long and how far sideways, at speed
+  S.driftT += d; S.driftPts += d * v * b * 10;
+  if ((b < 0.06 && !hb && S.driftT > 0.3) || v < 4) endDrift();
+  return courseRate;
+}
+function endDrift() {
+  if (!S.drifting) return;
+  S.drifting = false; S.driftEnd = simTime;
+  const pts = Math.round(S.driftPts || 0), combo = S.driftCombo || 1;
+  if (pts >= 40) { const total = pts * combo; banked += total; popup(`Drift ${pts}${combo > 1 ? ` x${combo}` : ''} +${total.toLocaleString()}`, 'good'); }
+  S.driftPts = 0;
 }
 function endBurnout() {
   const secs = S.burnT || 0, pts = Math.round(secs * 90);
@@ -453,20 +515,23 @@ function step(d) {
   // (a car's front wheels turn further at low speed, and hold on at speed)
   const maxSteer = B.car ? Math.min(0.62 / (1 + S.v / 16), gripSteer * 1.05) : Math.min(0.55 / (1 + S.v / 9), gripSteer) * (S.theta > 0.12 ? 0.55 : 1);
   S.steer += (steerIn * maxSteer - S.steer) * Math.min(1, d * 4.5);
-  const yawRate = S.v * Math.tan(S.steer) / B.L;
-  S.psi -= yawRate * d;
+  let yawRate = S.v * Math.tan(S.steer) / B.L;
+  if (B.car) yawRate = carDrift(B, d, steerIn, grip, yawRate);      // (turns the nose and the path apart in a drift)
+  else S.psi -= yawRate * d;
   S.alat = S.v * yawRate;
   const over = Math.abs(S.alat) / Math.max(0.1, grip * G);
   if (over > 1.25 && S.v > 9) S.slideT += d; else S.slideT = Math.max(0, S.slideT - d * 2);
   if (over > 0.95 && S.v > 7) S.skid = Math.max(S.skid, (over - 0.95) * 1.2);
   if (B.car) {
-    // a car doesn't lowside: past the grip it slides, scrubbing speed and screeching (a drift)
-    if (over > 1) { S.v *= Math.exp(-d * 0.6 * (over - 1)); S.skid = Math.max(S.skid, Math.min(0.4, (over - 1) * 0.8 + 0.1)); }
+    // a car doesn't lowside: past the grip it scrubs speed and screeches (and may break into a drift: carDrift)
+    if (over > 1 && !S.drifting) { S.v *= Math.exp(-d * 0.6 * (over - 1)); S.skid = Math.max(S.skid, Math.min(0.4, (over - 1) * 0.8 + 0.1)); }
     S.slideT = 0;
   } else if (S.slideT > 0.5) { crash('Lowsided', 'lowside'); return; }
   S.roll += (Math.atan(S.alat / G) - (S.roll || 0)) * Math.min(1, d * 5);
   const fx = Math.sin(S.psi), fz = Math.cos(S.psi);
-  S.x += fx * S.v * d; S.z += fz * S.v * d;
+  // a drifting car travels along its path, not where its nose points
+  const mv = B.car ? S.psi - (S.beta || 0) : S.psi;
+  S.x += Math.sin(mv) * S.v * d; S.z += Math.cos(mv) * S.v * d;
   const gy = S.onRoad ? roadY(RC[MAP.eCls[q.e]].rank) : (q.e >= 0 && q.d < q.hw + 2.6 && RC[MAP.eCls[q.e]].walk) ? CURB : 0;
   S.y += (gy - S.y) * Math.min(1, d * 18);
   // skid marks (both back tyres on a car)
@@ -601,6 +666,7 @@ function crash(reason, kind = 'wall', other = null, relSpeed) {
   const B = BIKES[bikeKey], v = relSpeed ?? S.v, fx = Math.sin(S.psi), fz = Math.cos(S.psi), rx = -fz, rz = fx;
   const sev = clamp(v / 18, 0.25, 1.5), side = Math.random() < 0.5 ? -1 : 1;
   S.crashed = true; S.crashT = 0; S.crashReason = reason; S.cpsi = S.psi;
+  S.drifting = false; S.beta = 0; S.driftPts = 0;
   const bvx = fx * S.v, bvz = fz * S.v;
   // bike body
   const cb = { x: S.x, y: S.y + B.R, z: S.z, vx: bvx, vy: 0, vz: bvz, rx: -S.theta, ry: S.psi, rz: S.roll, ax: 0, ay: 0, az: 0, contact: 0 };
@@ -1208,7 +1274,8 @@ function drawDash() {
   rig.dashTex.needsUpdate = true;
 }
 function updateCamera(dt) {
-  const B = BIKES[bikeKey], fx = Math.sin(S.psi), fz = Math.cos(S.psi), rx = -fz, rz = fx;
+  // (a drifting car: the camera follows mostly where it's going, so you see it slide sideways)
+  const B = BIKES[bikeKey], hd = B.car ? S.psi - (S.beta || 0) * 0.75 : S.psi, fx = Math.sin(hd), fz = Math.cos(hd), rx = -fz, rz = fx;
   const inPlay = state === 'play' || state === 'pause' || state === 'over';
   const firstish = inPlay && (pov === 'first' || pov === 'chest');
   rig.head.visible = !(inPlay && pov === 'first' && !(S.crashed && reduceMotion));
