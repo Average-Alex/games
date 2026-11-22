@@ -190,7 +190,9 @@ function updatePeds(d) {
     // getting hit
     if (!S.crashed && !S.riding && p.hitCd <= 0 && S.v > 1.5) {
       const B = BIKES[bikeKey], hx = S.x + fx * B.L * 0.5, hz = S.z + fz * B.L * 0.5;
-      if (Math.hypot(p.x - hx, p.z - hz) < 0.75) hitPed(p);
+      // a car is as long and wide as a car: check along its length
+      if (B.car) { const lx = (p.x - hx) * fx + (p.z - hz) * fz, ly = -(p.x - hx) * fz + (p.z - hz) * fx; if (Math.abs(lx) < B.len / 2 + 0.3 && Math.abs(ly) < B.W / 2 + 0.3) hitPed(p); }
+      else if (Math.hypot(p.x - hx, p.z - hz) < 0.75) hitPed(p);
     }
   }
   if (active < want && Math.random() < d * 4) { const p = peds.find((x) => !x.on); if (p) spawnPed(p); }
@@ -208,7 +210,8 @@ function hitPed(p) {
   sfx.bodyHit(Math.min(1.2, v / 10)); flash(0.35); S.shake = Math.max(S.shake, reduceMotion ? 0 : 0.2);
   popup('Hit a pedestrian', 'bad');
   addHeat(1.2);     // somebody always calls it in
-  if (v > 10) crash('Hit a pedestrian', 'pole');
+  if (BIKES[bikeKey].car) S.v *= 0.85;           // a car just thumps through
+  else if (v > 10) crash('Hit a pedestrian', 'pole');
   else S.v *= 0.45;
 }
 // standing poses: [left arm forward, left arm out, right arm forward, right arm out] (radians)

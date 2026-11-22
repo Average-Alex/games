@@ -25,6 +25,7 @@ function buildBike() {
     rig.root.traverse((o) => { if (o.geometry && !o.isSkinnedMesh) o.geometry.dispose(); });
     rig.rider.traverse((o) => { if (o.geometry && !o.isSkinnedMesh) o.geometry.dispose(); });
   }
+  if (BIKES[bikeKey].car) { rig = buildCarRig(BIKES[bikeKey], riderLook.bike === 'stock' ? BIKES[bikeKey].color : riderLook.bike); return; }
   const B = BIKES[bikeKey], R = B.R, Rf = B.Rf || R, L = B.L, ys = B.seat - R;   // ys: seat top above rear axle
   const yF = Rf - R;                                                             // front axle height relative to rear axle
   const gas = B.type === 'gas', st = B.style, road = st === 'sport' || st === 'naked';

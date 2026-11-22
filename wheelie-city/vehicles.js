@@ -9,7 +9,80 @@ const CAR_TYPES = {
   hatch:  { L: 4.1, W: 1.78, wb: 2.55, r: 0.31, body: [[-2.05, 0.3], [2.05, 0.3], [2.08, 0.6], [1.95, 0.8], [0.95, 0.92], [-1.95, 0.95], [-2.07, 0.6]], cabin: [[0.9, 0.9], [0.15, 1.4], [-1.7, 1.42], [-1.98, 0.95]], roof: [-1.66, 0.12, 1.42] },
   pickup: { L: 5.6, W: 2.0, wb: 3.4, r: 0.4, body: [[-2.8, 0.45], [2.8, 0.45], [2.83, 0.85], [2.7, 1.12], [1.5, 1.2], [-2.8, 1.2], [-2.82, 0.85]], cabin: [[1.45, 1.17], [0.85, 1.86], [-0.5, 1.88], [-0.62, 1.2]], roof: [-0.48, 0.82, 1.88] },
   van:    { L: 5.2, W: 2.0, wb: 3.2, r: 0.36, body: [[-2.6, 0.38], [2.6, 0.38], [2.62, 0.9], [2.3, 1.25], [1.6, 1.4], [-2.6, 1.42], [-2.62, 0.9]], cabin: [[1.55, 1.38], [1.0, 2.08], [-2.55, 2.12], [-2.6, 1.4]], roof: [-2.5, 0.95, 2.12] },
+  // drivable sports and muscle cars (core.js BIKES with car: true)
+  vette:   { L: 4.63, W: 1.93, wb: 2.72, r: 0.35, body: [[-2.3, 0.28], [2.3, 0.26], [2.34, 0.46], [2.22, 0.64], [1.25, 0.8], [-0.95, 0.92], [-2.22, 0.98], [-2.35, 0.62]], cabin: [[1.2, 0.78], [0.2, 1.2], [-0.7, 1.19], [-1.65, 0.93]], roof: [-0.65, 0.15, 1.2] },
+  camaro:  { L: 4.78, W: 1.9, wb: 2.81, r: 0.36, body: [[-2.39, 0.32], [2.39, 0.3], [2.43, 0.62], [2.32, 0.86], [0.95, 0.98], [-1.6, 1.0], [-2.35, 1.0], [-2.43, 0.62]], cabin: [[0.85, 0.96], [0.05, 1.32], [-0.95, 1.32], [-1.75, 1.0]], roof: [-0.9, 0.0, 1.32] },
+  mustang: { L: 4.79, W: 1.92, wb: 2.72, r: 0.36, body: [[-2.39, 0.32], [2.39, 0.3], [2.43, 0.62], [2.3, 0.85], [0.95, 0.97], [-1.9, 0.99], [-2.35, 0.98], [-2.43, 0.62]], cabin: [[0.95, 0.96], [0.15, 1.36], [-0.6, 1.36], [-1.95, 0.99]], roof: [-0.55, 0.1, 1.36] },
+  hellcat: { L: 5.02, W: 1.92, wb: 2.95, r: 0.37, body: [[-2.5, 0.33], [2.5, 0.32], [2.53, 0.7], [2.45, 0.92], [1.0, 1.02], [-1.8, 1.04], [-2.47, 1.02], [-2.53, 0.66]], cabin: [[0.9, 1.0], [0.1, 1.42], [-1.0, 1.42], [-1.85, 1.04]], roof: [-0.95, 0.05, 1.42] },
+  r34:     { L: 4.6, W: 1.79, wb: 2.67, r: 0.33, body: [[-2.3, 0.3], [2.3, 0.28], [2.33, 0.6], [2.2, 0.8], [1.05, 0.92], [-1.6, 0.95], [-2.28, 0.97], [-2.33, 0.62]], cabin: [[1.0, 0.9], [0.25, 1.36], [-0.85, 1.36], [-1.55, 0.95]], roof: [-0.8, 0.2, 1.36] },
+  supra:   { L: 4.52, W: 1.81, wb: 2.55, r: 0.33, body: [[-2.26, 0.3], [2.26, 0.28], [2.29, 0.54], [2.1, 0.72], [1.0, 0.86], [-1.5, 0.94], [-2.22, 0.98], [-2.29, 0.6]], cabin: [[0.95, 0.84], [0.2, 1.26], [-0.7, 1.26], [-1.5, 0.94]], roof: [-0.65, 0.15, 1.26] },
+  lambo:   { L: 4.52, W: 1.96, wb: 2.62, r: 0.35, body: [[-2.26, 0.26], [2.26, 0.22], [2.3, 0.38], [1.45, 0.68], [0.6, 0.84], [-1.3, 0.94], [-2.2, 0.95], [-2.3, 0.55]], cabin: [[0.65, 0.83], [-0.15, 1.14], [-0.9, 1.14], [-1.75, 0.94]], roof: [-0.85, -0.2, 1.14] },
+  p911:    { L: 4.54, W: 1.9, wb: 2.45, r: 0.35, body: [[-2.27, 0.3], [2.27, 0.28], [2.3, 0.52], [2.05, 0.72], [1.1, 0.85], [-1.2, 0.9], [-2.2, 0.86], [-2.3, 0.55]], cabin: [[1.05, 0.84], [0.15, 1.29], [-0.65, 1.28], [-1.95, 0.88]], roof: [-0.6, 0.1, 1.29] },
 };
+// Extras that make each car read as itself: wings, scoops, stripes, side intakes
+const CAR_EXTRAS = { r34: { wing: [0.32, 1.05] }, supra: { wing: [0.28, 1.06] }, hellcat: { scoop: true, stripes: true }, camaro: { stripes: true }, mustang: { stripes: true },
+  vette: { intakes: true }, lambo: { intakes: true, wing: [0.1, 1.0] }, p911: { wing: [0.06, 0.92] } };
+// The player's car: the same body as traffic, with its own wheels that spin (rear, front groups) and steer
+function buildCarRig(B, paintHex) {
+  const T = CAR_TYPES[B.shape], G_ = carGeo(B.shape), R = B.R;
+  const root = new THREE.Group(), body = new THREE.Group(); root.add(body);
+  const paint = quality === 'low' ? M(paintHex, 0.32, 0.45) : new THREE.MeshPhysicalMaterial({ color: paintHex, roughness: 0.3, metalness: 0.65, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.4 });
+  const accent = M(B.accent, 0.4, 0.3);
+  // the model stands on the ground centred on its wheelbase; the rig's origin is the rear axle
+  const shell = new THREE.Group(); shell.position.set(0, -R, T.wb / 2); body.add(shell);
+  const add = (geo, mat, cast) => { const me = new THREE.Mesh(geo, mat); if (cast) me.castShadow = true; shell.add(me); return me; };
+  add(G_.body, paint, true); add(G_.glass, carMats.glass); add(G_.roof, paint); add(G_.bump, carMats.bump);
+  add(G_.head, carMats.head); add(G_.tail, carMats.tail); add(G_.plates, carMats.plate);
+  // top of the body outline at z (where a vertical line at z crosses the profile, highest crossing)
+  const ex = CAR_EXTRAS[B.shape] || {}, top = (z) => {
+    let y = 0; const P = T.body;
+    for (let i = 0; i < P.length; i++) { const [z0, y0] = P[i], [z1, y1] = P[(i + 1) % P.length]; if ((z0 - z) * (z1 - z) <= 0 && z0 !== z1) y = Math.max(y, y0 + (y1 - y0) * (z - z0) / (z1 - z0)); }
+    return y;
+  };
+  if (ex.wing) {
+    const [h, z0] = ex.wing, zw = -T.L / 2 + 0.25, yb = top(zw);
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(T.W * 0.9, 0.04, 0.32), ex.wing[0] > 0.2 ? accent : paint); blade.position.set(0, yb + h, zw); blade.rotation.x = 0.1; shell.add(blade);
+    for (const s of [1, -1]) { const st = new THREE.Mesh(new THREE.BoxGeometry(0.05, h, 0.12), accent); st.position.set(s * T.W * 0.32, yb + h / 2, zw); shell.add(st); }
+    void z0;
+  }
+  if (ex.scoop) { const sc = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.1, 0.8), accent); sc.position.set(0, top(1.4) + 0.03, 1.5); shell.add(sc); }
+  if (ex.stripes) {
+    // racing stripes over the hood and trunk (the roof is glass-edged, so they stop at the screen)
+    const sm = M(B.accent, 0.3, 0.4);
+    for (const s of [1, -1]) for (const zc of [1.75, 1.15, -1.55, -2.0]) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.012, 0.6), sm); b.position.set(s * 0.16, top(zc) + 0.012, zc); shell.add(b); }
+  }
+  if (ex.intakes) for (const s of [1, -1]) { const it = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.22, 0.6), carMats.bump); it.position.set(s * (T.W / 2 + 0.005), 0.62, -0.55); shell.add(it); }
+  // wheels: tyre, alloy rim with spokes, brake disc; rear pair and front pair, each spinning about its axle
+  const tire = M('#151515', 0.9, 0), rimM = M('#c4cad0', 0.22, 0.95), disc = M('#7d8186', 0.4, 0.8), caliper = M(B.shape === 'p911' || B.shape === 'lambo' ? '#e8c21a' : '#c8102e', 0.35, 0.3);
+  const wheels = [];
+  for (const [z, r] of [[0, B.R], [T.wb, B.Rf || B.R]]) {
+    const axleG = new THREE.Group(); axleG.position.set(0, 0, z); body.add(axleG);
+    const spin = new THREE.Group(); axleG.add(spin);
+    for (const s of [1, -1]) {
+      const w = new THREE.Group(); w.position.x = s * (T.W / 2 - 0.13);
+      const t = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.27, 24), tire); t.rotation.z = Math.PI / 2; t.castShadow = true; w.add(t);
+      const rim = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.66, r * 0.66, 0.02, 24), rimM); rim.rotation.z = Math.PI / 2; rim.position.x = s * 0.13; w.add(rim);
+      for (let k = 0; k < 5; k++) { const sp = new THREE.Mesh(new THREE.BoxGeometry(0.03, r * 0.62, 0.06), rimM); sp.geometry.translate(0, r * 0.31, 0); sp.rotation.x = k / 5 * TAU; sp.position.x = s * 0.145; w.add(sp); }
+      const dc = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.5, r * 0.5, 0.02, 20), disc); dc.rotation.z = Math.PI / 2; dc.position.x = s * 0.07; w.add(dc);
+      spin.add(w);
+      const cal = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.12, 0.16), caliper); cal.position.set(s * (T.W / 2 - 0.13 + s * 0.09), r * 0.35, -r * 0.2); axleG.add(cal);
+    }
+    wheels.push(spin);
+  }
+  // the driver's seat (left-hand drive): camera anchors and an empty "rider" for the code that expects one
+  const rider = new THREE.Group(); body.add(rider);
+  const upper = new THREE.Group(); upper.position.set(0.37, 0.55, T.wb / 2 - 0.35); rider.add(upper);
+  const head = new THREE.Group(); head.position.set(0, 0.55, 0); upper.add(head);
+  const eye = new THREE.Object3D(); eye.position.set(0, 0.05, 0.1); head.add(eye);
+  const chest = new THREE.Object3D(); chest.position.set(0, 0.2, 0.9); upper.add(chest);
+  const barCam = new THREE.Object3D(); barCam.position.set(0, 0.4, T.wb / 2 + 0.6); body.add(barCam);
+  const limb = () => { const g = new THREE.Group(); rider.add(g); return g; };
+  const dashCv = document.createElement('canvas'); dashCv.width = 256; dashCv.height = 128;
+  const dashTex = new THREE.CanvasTexture(dashCv);
+  scene.add(root);
+  return { root, body, wheels, rider, upper, head, eye, chest, barCam, dashCv, dashTex, B, paint, accent, armL: limb(), armR: limb(), legL: limb(), legR: limb(),
+    riderHome: { p: rider.position.clone(), q: rider.quaternion.clone() }, upperHome: upper.rotation.clone(), ragdoll: null, car: true, T };
+}
 const geoCache = {};
 // Round every corner of a profile with a small arc so bodies read as pressed metal, not boxes
 function roundProfile(pts, r) {
