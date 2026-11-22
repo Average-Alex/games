@@ -203,7 +203,21 @@ let cityKey = store.get('wc-city', 'van'); if (!CITIES[cityKey]) cityKey = 'van'
 let bikeKey = store.get('wc-bike2', 'lbx'); if (!BIKES[bikeKey]) bikeKey = 'lbx';
 let pov = store.get('wc-pov2', 'chase'); if (!POVS.some((p) => p[0] === pov)) pov = 'chase';
 let sens = store.get('wc-sens', 1);
-let quality = store.get('wc-quality2', 'ultra'); if (!['low', 'med', 'high', 'ultra'].includes(quality)) quality = 'ultra';
+// Default graphics level from the GPU: Ultra only on a real graphics card; laptop chips (Intel Iris / UHD, Chromebooks,
+// phones) get High or Medium, which they can hold at a playable frame rate. Your own choice is remembered.
+function autoQuality() {
+  try {
+    const gl = document.createElement('canvas').getContext('webgl');
+    if (!gl) return 'low';
+    const d = gl.getExtension('WEBGL_debug_renderer_info'), r = d ? String(gl.getParameter(d.UNMASKED_RENDERER_WEBGL)) : '';
+    const lose = gl.getExtension('WEBGL_lose_context'); if (lose) lose.loseContext();
+    if (/swiftshader|llvmpipe|software|microsoft basic/i.test(r)) return 'low';
+    if (/mali|adreno|powervr|uhd|hd graphics|apple gpu/i.test(r) || /CrOS/.test(navigator.userAgent)) return 'med';
+    if (/intel|iris|radeon\(tm\) graphics|vega \d+ graphics/i.test(r)) return 'high';
+    return 'ultra';
+  } catch { return 'high'; }
+}
+let quality = store.get('wc-quality3', null); if (!['low', 'med', 'high', 'ultra'].includes(quality)) quality = autoQuality();
 let C = CITIES[cityKey];
 
 // ---------------------------------------------------------------- renderer and stage

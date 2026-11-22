@@ -47,9 +47,13 @@ function loadMap(key, onStatus) {
   });
 }
 
+// a short pause between unpacking stages, so the page still answers clicks while a big city unpacks
+const yieldUI = () => new Promise((r) => setTimeout(r, 0));
 async function decodeMap(meta, b64) {
+  const T0 = performance.now(), lap = (k) => { if (typeof LOAD_MS !== 'undefined') LOAD_MS['map_' + k] = Math.round(performance.now() - T0); };
   const bin = atob(b64), bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  lap('b64');
   if (!('DecompressionStream' in window)) throw new Error('This browser is too old to unpack the map (needs DecompressionStream). Try a current Chrome, Edge, Firefox or Safari.');
   const buf = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
   const T = { int32: Int32Array, int16: Int16Array, uint8: Uint8Array, uint16: Uint16Array };
@@ -86,6 +90,7 @@ async function decodeMap(meta, b64) {
     const R = RC[m.eCls[e]], one = m.eFlag[e] & F_ONEWAY, lanes = m.eLanes[e] || (one && R.lanes > 2 && !R.hwy ? R.lanes / 2 : R.lanes);
     m.eHW[e] = lanes * R.lw / 2 + (one ? R.park * 0.5 : R.park) + R.sh;
   }
+  lap('s1'); await yieldUI();
   // miter normals (right of a→b, scaled so offsets keep their width through bends)
   m.mx = new Float32Array(tot); m.mz = new Float32Array(tot);
   for (let e = 0; e < nE; e++) {
@@ -99,6 +104,7 @@ async function decodeMap(meta, b64) {
       m.mx[i] = ax; m.mz[i] = az;
     }
   }
+  lap('s2'); await yieldUI();
   // adjacency: entries are e*2 (leave via a→b) or e*2+1 (leave via b→a)
   const deg = new Int32Array(N + 1);
   for (let e = 0; e < nE; e++) { deg[m.eA[e]]++; deg[m.eB[e]]++; }
@@ -125,6 +131,7 @@ async function decodeMap(meta, b64) {
     each((c) => { items[pos[c]++] = cur; }, (i) => { cur = i; });
     return { start: cnt, items };
   }
+  lap('s3'); await yieldUI();
   // road segments (index = first point of the segment)
   m.segGrid = csr(tot, (add, setCur) => {
     for (let i = 0; i < tot - 1; i++) {
@@ -155,6 +162,7 @@ async function decodeMap(meta, b64) {
     for (let k = 0; k < cnt; k++) { x += bp[2 * (st + k)] * u; z += bp[2 * (st + k) + 1] * u; o++; m.bx[o] = x; m.bz[o] = z; x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
     m.bBox.set([x0, z0, x1, z1], b * 4);
   }
+  lap('s4'); await yieldUI();
   m.bGrid = csr(nB, (add, setCur) => {
     for (let b = 0; b < nB; b++) {
       if (setCur) setCur(b);
@@ -163,6 +171,7 @@ async function decodeMap(meta, b64) {
     }
   });
 
+  lap('s5'); await yieldUI();
   // trees (OSM)
   const tI = sec('trees'); m.T = tI.length / 2; m.tx = new Float32Array(m.T); m.tz = new Float32Array(m.T);
   for (let i = 0; i < m.T; i++) { m.tx[i] = tI[2 * i] * u; m.tz[i] = tI[2 * i + 1] * u; }
@@ -228,6 +237,7 @@ async function decodeMap(meta, b64) {
   for (let k = 0, o = 0; k < rle.length; k += 2) { const v = rle[k], n = rle[k + 1]; if (v) m.land.fill(v, o, o + n); o += n; }
   m.muni = sec('muni'); m.MW = meta.MW; m.MH = meta.MH; m.mres = meta.mres;
 
+  lap('s6'); await yieldUI();
   // tile indexes: what each 160 m tile builds
   const tkey = (x, z) => (Math.floor(x / TILE) + 2048) * 4096 + (Math.floor(z / TILE) + 2048);
   m.tkey = tkey;
@@ -250,6 +260,7 @@ async function decodeMap(meta, b64) {
   m.names = meta.names; m.munis = meta.munis;
   m.places = meta.places.filter((p) => ['neighbourhood', 'suburb', 'quarter', 'borough', 'village'].includes(p[1]));
   m.towns = meta.places.filter((p) => p[1] === 'city' || p[1] === 'town');
+  lap('end');
   MAP = m;
   return m;
 }

@@ -61,7 +61,7 @@ povSel.addEventListener('change', () => setPov(povSel.value));
 $('#sens').value = sens;
 $('#sens').addEventListener('input', (e) => { sens = parseFloat(e.target.value); store.set('wc-sens', sens); });
 const qualSel = $('#quality'); qualSel.value = quality;
-qualSel.addEventListener('change', () => { quality = qualSel.value; store.set('wc-quality2', quality); applyQuality(); setupSky(); if (MAP) { clearTiles(); setupMapMaterials(); setupWorld(); applyWeather(0, true); updateTiles(S.x, S.z, true); } });
+qualSel.addEventListener('change', () => { quality = qualSel.value; store.set('wc-quality3', quality); applyQuality(); setupSky(); if (MAP) { clearTiles(); setupMapMaterials(); setupWorld(); applyWeather(0, true); updateTiles(S.x, S.z, true); } });
 const wxSel = $('#weatherSel'); wxSel.value = WX.mode;
 wxSel.addEventListener('change', () => { WX.mode = wxSel.value; store.set('wc-weather', WX.mode); if (WX.mode !== 'auto') { WX.from = WX.to = WX.mode; WX.t = 1; WX.wet = WX.mode === 'rain' ? 1 : 0; applyWeather(0, true); } });
 const respSel = $('#respawnMode'); respSel.value = store.get('wc-respawn', 'crash');
@@ -91,6 +91,13 @@ async function loadCity(key) {
     if (loadingKey !== key) return;
     C = CITIES[key];
     setupCity();
+    // the first frame compiles every shader (several seconds on laptop graphics, and the page can't take clicks
+    // meanwhile): keep Ride off and say so until it has drawn
+    mapStatus('Preparing graphics…');
+    const tf = performance.now();
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    LOAD_MS.firstFrame = Math.round(performance.now() - tf);
+    if (loadingKey !== key) return;
     mapReady = true; $('#go').disabled = false;
     mapStatus(`${C.name}: ${m.E.toLocaleString()} street segments · ${m.B.toLocaleString()} buildings · ${m.N.toLocaleString()} junctions`);
   } catch (e) {
@@ -98,17 +105,19 @@ async function loadCity(key) {
     if (loadingKey === key) mapStatus(e.message || String(e), true);
   }
 }
+const LOAD_MS = {};      // how long each setup step took (for finding load-time stalls)
 function setupCity() {
-  setupSky();
-  setupMapMaterials();
-  setupWorld();
-  applyWeather(0, true);
-  buildUnitPools();
-  buildPeds();
-  buildTrains();
+  const step = (name, f) => { const t = performance.now(); f(); LOAD_MS[name] = Math.round(performance.now() - t); };
+  step('sky', setupSky);
+  step('materials', setupMapMaterials);
+  step('world', setupWorld);
+  step('weather', () => applyWeather(0, true));
+  step('units', buildUnitPools);
+  step('peds', buildPeds);
+  step('trains', buildTrains);
   endTransit();
   cityMapCv = null;
-  resetWorld();
+  step('reset', resetWorld);
 }
 // Your chosen spawn point for this city (set from the city map), or the city's default
 function spawnPoint() {

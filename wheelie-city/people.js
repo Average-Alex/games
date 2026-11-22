@@ -31,7 +31,9 @@ function loadPeople() {
     for (const [k, g] of [['male', male], ['female', female]]) PEOPLE.base[k] = g.scene;
     hairNames.forEach((n, i) => { let sm = null; hairs[i].scene.traverse((o) => { if (o.isSkinnedMesh && !sm) sm = o; }); if (sm) PEOPLE.hair[n] = sm; });
     for (const c of anims.animations) PEOPLE.clips[c.name] = c;
+    const t0 = performance.now();
     for (const k of ['male', 'female']) prepBody(k);
+    PEOPLE.prepMs = Math.round(performance.now() - t0);
     PEOPLE.ready = true;
     return true;
   }).catch((e) => { console.warn('people models', e); PEOPLE.err = String(e && e.stack || e); PEOPLE.failed = true; return false; });
