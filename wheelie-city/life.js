@@ -41,8 +41,22 @@ function mergeColored(parts) {
   return out;
 }
 function buildPeds() {
-  for (const p of peds) { scene.remove(p.g); p.g.traverse((o) => o.geometry && o.geometry.dispose()); }
+  for (const p of peds) { scene.remove(p.g); if (p.model) p.model.mixer.stopAllAction(); else p.g.traverse((o) => o.geometry && o.geometry.dispose()); }   // (model people share their geometry)
   peds.length = 0;
+  // real people (people.js) once their models are loaded; until then (or if they fail) the simple built ones
+  if (typeof PEOPLE !== 'undefined' && PEOPLE.ready) {
+    const N = quality === 'low' ? 10 : quality === 'ultra' ? 34 : quality === 'high' ? 26 : 16;
+    for (let i = 0; i < N; i++) {
+      const r = mulberry(i * 977 + 13), m = makePed(r);
+      const g = new THREE.Group(), body = new THREE.Group(); g.add(body); body.add(m.root);
+      const sc = 0.93 + r() * 0.12; g.scale.setScalar(sc);
+      const dummy = () => new THREE.Object3D();
+      g.visible = false; scene.add(g);
+      peds.push({ g, body, model: m, legL: dummy(), legR: dummy(), armL: dummy(), armR: dummy(), on: false, x: 0, z: 0, yaw: 0, phase: r() * TAU, knock: null, dodge: 0, hitCd: 0 });
+    }
+    return;
+  }
+  if (typeof loadPeople === 'function' && !PEOPLE.failed) loadPeople().then((ok) => { if (ok && MAP) buildPeds(); });
   const N = quality === 'low' ? 14 : quality === 'ultra' ? 56 : quality === 'high' ? 40 : 28;
   for (let i = 0; i < N; i++) {
     const r = mulberry(i * 977 + 13), skin = pick(r, PED_SKIN), top = pick(r, PED_TOP), legs = pick(r, PED_LEGS), hair = pick(r, PED_HAIR);
@@ -66,7 +80,8 @@ function spawnPed(p) {
     const R = RC[MAP.eCls[q.e]];
     const idle = Math.random() < 0.22;
     Object.assign(p, { on: true, e: q.e, s: q.s, dir: Math.random() < 0.5 ? 1 : -1, side: Math.random() < 0.5 ? 1 : -1, v: 0.95 + Math.random() * 0.75, knock: null, dodge: 0,
-      idle: idle ? 6 + Math.random() * 18 : 0, pose: idle ? pick(Math.random, IDLE_POSES) : 'stand', watch: null, busy: Math.random() < 0.25 ? 'phone' : '' });
+      idle: idle ? 6 + Math.random() * 18 : 0, pose: idle ? pick(Math.random, IDLE_POSES) : 'stand', watch: null, busy: Math.random() < 0.25 ? 'phone' : '',
+      dance: idle && Math.random() < (C.night ? 0.12 : 0.03) });
     p.off = R.path ? (Math.random() - 0.5) * 1.2 : MAP.eHW[q.e] + 1.0 + Math.random() * 1.0;
     pedPlace(p);
     if (buildingAt(p.x, p.z, 0.3) >= 0 || hitAt(p.x, p.z, 0.3)) continue;
@@ -96,6 +111,15 @@ function updatePeds(d) {
       k.vy -= G * d; p.x += k.vx * d; p.z += k.vz * d; k.y += k.vy * d;
       if (k.y < 0) { k.y = 0; if (k.vy < -2) sfx.bodyHit(Math.min(1, -k.vy / 8)); k.vy = Math.abs(k.vy) * 0.25; k.vx *= 0.55; k.vz *= 0.55; k.spin *= 0.5; if (Math.hypot(k.vx, k.vz) < 0.3) k.down += d; }
       k.rot += k.spin * d;
+      if (p.model) {
+        // a real person: thrown (tumbling), then the fall animation takes over on the ground
+        p.g.position.set(p.x, k.y, p.z);
+        if (k.y > 0.05) { p.body.rotation.x = k.rot * 0.4; personPlay(p.model, 'Hit_Chest', 0.1); }
+        else { p.body.rotation.x = lerp(p.body.rotation.x, 0, Math.min(1, d * 8)); personPlay(p.model, 'Death01', 0.15); }
+        p.model.mixer.update(d);
+        if (k.down > 3) { p.knock = null; p.body.rotation.x = 0; snapPed(p); say(p, pick(Math.random, PED_CURSES), false); }
+        continue;
+      }
       p.g.position.set(p.x, k.y + 0.15, p.z);
       p.body.rotation.x = k.y > 0.05 ? k.rot : lerp(p.body.rotation.x, -Math.PI / 2, Math.min(1, d * 6));
       p.armL.rotation.x = Math.sin(k.rot * 3) * 1.4; p.armR.rotation.x = -Math.sin(k.rot * 3) * 1.4;
@@ -137,18 +161,30 @@ function updatePeds(d) {
     p.phase += (walking ? p.v * 5.2 : 0) * d;
     p.breath = (p.breath || 0) + d;
     const sw = walking ? Math.sin(p.phase) : 0, amp = 0.38 + p.v * 0.14;
-    p.legL.rotation.set(sw * amp, 0, 0); p.legR.rotation.set(-sw * amp, 0, 0);
-    if (walking) {
+    if (p.model) {
+      // real animation clips: walking (brisk walkers jog), standing about, chatting on the phone, and the odd dancer
+      const m = p.model;
+      if (walking) personPlay(m, p.v > 1.55 ? 'Jog_Fwd_Loop' : p.busy === 'phone' ? 'Walk_Formal_Loop' : 'Walk_Loop', 0.3, p.v > 1.55 ? p.v / 3.2 : p.v / 1.3);
+      else personPlay(m, p.pose === 'phone' || p.pose === 'text' ? 'Idle_Talking_Loop' : p.dance ? 'Dance_Loop' : 'Idle_Loop', 0.4, 1);
+      // animate the ones near you every frame, the far ones less often
+      p.animT = (p.animT || 0) + d;
+      if (dist < 70 || p.animT > 0.1) { m.mixer.update(p.animT); p.animT = 0; }
+      if (!walking && p.watch) p.yaw = Math.atan2(p.watch[0] - p.x, p.watch[1] - p.z);
+      p.body.rotation.set(0, 0, 0);
+      p.g.position.set(p.x, p.off > 1.5 ? CURB : 0.03, p.z);
+    } else if (walking) {
+      p.legL.rotation.set(sw * amp, 0, 0); p.legR.rotation.set(-sw * amp, 0, 0);
       if (p.busy === 'phone') { p.armL.rotation.set(-sw * amp * 0.8, 0, 0.06); p.armR.rotation.set(-1.2, 0, 0.3); }     // eyes on the phone while walking
       else { p.armL.rotation.set(-sw * amp * 0.85, 0, 0.07); p.armR.rotation.set(sw * amp * 0.85, 0, -0.07); }
       p.body.rotation.set(0.04, sw * 0.07, Math.cos(p.phase) * 0.025);
     } else {
+      p.legL.rotation.set(0, 0, 0); p.legR.rotation.set(0, 0, 0);
       const P = IDLE_ARMS[p.pose] || IDLE_ARMS.stand, br = Math.sin(p.breath * 1.6) * 0.02;
       p.armL.rotation.set(P[0] + br, 0, P[1]); p.armR.rotation.set(P[2] + br, 0, P[3]);
       p.body.rotation.set(br * 0.5, 0, Math.sin(p.breath * 0.4) * 0.02);       // shifting weight
       if (p.watch) p.yaw = Math.atan2(p.watch[0] - p.x, p.watch[1] - p.z);
     }
-    p.g.position.set(p.x, (p.off > 1.5 ? CURB : 0.03) + Math.abs(Math.cos(p.phase)) * 0.035 * (walking ? 1 : 0), p.z);
+    if (!p.model) p.g.position.set(p.x, (p.off > 1.5 ? CURB : 0.03) + Math.abs(Math.cos(p.phase)) * 0.035 * (walking ? 1 : 0), p.z);
     p.g.rotation.y += wrapPi(p.yaw - p.g.rotation.y) * Math.min(1, d * 8);
     if (p.idle <= 0 && p.watch) p.watch = null;
     // getting hit

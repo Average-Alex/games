@@ -438,16 +438,25 @@ function step(d) {
     if (!u.on) continue;
     const dx = S.x - u.x, dz = S.z - u.z;
     const c = Math.cos(u.yaw), s = Math.sin(u.yaw);
-    const lx = dx * c - dz * s, lz = dx * s + dz * c;
-    const hx = (u.T.W || 1.9) / 2 + 0.15, hz = (u.T.L || 4.4) / 2 + 0.1;
-    const flx = (dx + fx * B.L) * c - (dz + fz * B.L) * s, flz = (dx + fx * B.L) * s + (dz + fz * B.L) * c;
-    if ((Math.abs(lx) < hx && Math.abs(lz) < hz) || (Math.abs(flx) < hx && Math.abs(flz) < hz)) {
+    const hx = (u.T.W || 1.9) / 2 + 0.3, hz = (u.T.L || 4.4) / 2 + 0.15;
+    // the bike is tested at its back wheel, its middle (the rider) and its front wheel
+    let lx = 0, lz = 0, inside = false;
+    for (const f of [0, 0.5, 1]) {
+      const px = dx + fx * B.L * f, pz = dz + fz * B.L * f, ax = px * c - pz * s, az = px * s + pz * c;
+      if (Math.abs(ax) < hx && Math.abs(az) < hz) { lx = ax; lz = az; inside = true; break; }
+    }
+    if (inside) {
       const rel = Math.hypot(fx * S.v - Math.sin(u.yaw) * u.v, fz * S.v - Math.cos(u.yaw) * u.v);
-      if (rel < 5 || S.spawnGrace > 0) {
-        // a nudge, not a crash: get pushed out sideways and lose speed
-        const side = lx >= 0 ? 1 : -1, nx = c * side, nz = -s * side;
-        S.x += nx * (hx - Math.abs(lx) + 0.2); S.z += nz * (hx - Math.abs(lx) + 0.2);
-        S.v *= 0.6; u.v *= 0.7;
+      // a cop pacing you in a normal pursuit only shoves you; only a ramming cop (3+ stars) or a hard hit crashes you
+      const gentleCop = u.kind !== 'car' && u.chasing && !(stars() >= 3 && u.tac === 'ram') && rel < 9;
+      if (rel < 3.5 || S.spawnGrace > 0 || gentleCop) {
+        // a bump, not a crash: pushed out the shortest way (side, front or back) and stopped against it
+        const penX = hx - Math.abs(lx), penZ = hz - Math.abs(lz);
+        if (penX < penZ) { const sd = lx >= 0 ? 1 : -1; S.x += c * sd * (penX + 0.05); S.z += -s * sd * (penX + 0.05); }
+        else { const sd = lz >= 0 ? 1 : -1; S.x += s * sd * (penZ + 0.05); S.z += c * sd * (penZ + 0.05); }
+        // lose the speed you had going into it
+        const into = -((fx * (s * Math.sign(lz || 1))) + (fz * (c * Math.sign(lz || 1))));
+        S.v *= penX < penZ ? 0.55 : into > 0.3 ? 0.1 : 0.6; u.v *= 0.7;
         if ((u.bumpCd || 0) <= 0) { sfx.thump(0.5); u.bumpCd = 1; if (u.kind === 'car') { sfx.horn(u); say(u, pick(Math.random, CURSES), true); } }
         continue;
       }
@@ -470,7 +479,8 @@ function step(d) {
 
   // Offences a cop might see (only counts when one is close enough to see you)
   const onWalk = !S.onRoad && q.e >= 0 && q.d < q.hw + 2.8 && RC[MAP.eCls[q.e]].walk;
-  if (W.active) offense((anyTrick ? 0.22 : 0.1) * d);
+  // wheelies are the game: they only count if a cop is right there watching, and slowly
+  if (W.active && copNear(35)) addHeat((anyTrick ? 0.12 : 0.05) * d);
   if (q.e >= 0 && RC[MAP.eCls[q.e]].v && S.v > RC[MAP.eCls[q.e]].v * 1.4 + 5) offense(0.07 * d);
   if (onWalk && S.v > 6) offense(0.05 * d);
   if ((S.surface === 'grass') && S.v > 6) offense(0.03 * d);
@@ -736,6 +746,8 @@ function copNear(range) {
 function offense(amount) { if (copNear(70)) addHeat(amount, false); }
 function addHeat(amount) {
   const before = stars();
+  // a heads-up before the first star, so it never comes out of nowhere
+  if (heat < 0.4 && heat + amount >= 0.4 && before === 0) popup('A cop saw that · calm down or you’ll get a star', 'cop');
   heat = Math.min(5.99, heat + amount);
   unseenT = 0;
   if (stars() > before) {
@@ -871,6 +883,13 @@ function updateUnits(d) {
           const side = ((u.x - S.x) * bfz - (u.z - S.z) * bfx) >= 0 ? 1 : -1;
           u.aimX = S.x - bfx * 0.8 + bfz * side * 0.9; u.aimZ = S.z - bfz * 0.8 - bfx * side * 0.9;
           target = Math.min(top + 4, S.v + (dist < 25 ? 7 : 12));
+        } else if (!S.crashed) {
+          // a normal pursuit (under 3 stars, or a boxing-in cop): come up alongside you and pace you, never into you
+          const side = ((u.x - S.x) * bfz - (u.z - S.z) * bfx) >= 0 ? 1 : -1, behind = (u.x - S.x) * bfx + (u.z - S.z) * bfz < 0;
+          u.aimX = S.x + bfx * 3 + bfz * side * 3.6; u.aimZ = S.z + bfz * 3 - bfx * side * 3.6;
+          const gap = Math.hypot(u.aimX - u.x, u.aimZ - u.z);
+          target = Math.min(top, Math.max(0, S.v + gap * 0.7));
+          if (behind && dist < 7) target = Math.min(target, S.v * 0.85);     // right on your tail: back off, don't rear-end you
         }
       }
       if (u.parkT > 0) target = 0;

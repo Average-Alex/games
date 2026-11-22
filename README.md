@@ -36,6 +36,9 @@ Browser games, published at https://average-alex.github.io/games/
     - Science World's geodesic dome
     - Lions Gate Bridge's towers and cables
   - New York: the Empire State Building's stepped crown and spire
+- **Real people** (`wheelie-city/people.js`). Pedestrians use Quaternius' Universal Base Characters and Universal Animation Library (CC0): proper bodies, faces and hair, with real walk, jog, idle, talking, dance, hit and fall animations. The models come in underwear, so the clothes (t-shirts or long sleeves, trousers or shorts, shoes) are generated from the body surface at load. The files are built by `tools/people` (`npm install`, then `node build_people.mjs <folder with the unzipped packs>` and `build_textures.py`). If they fail to load, the old simple people are used.
+- **No more grainy picture.** Film grain, lens fringing and most sharpening are off, and the auto-resolution never drops below 65%.
+- **Car and cop fixes.** Cars now collide with the middle of the bike too, and slow bumps stop you instead of sliding you through. Under 3 stars, cops pace alongside you instead of ramming, and wheelies only get you noticed by a cop within 35 m (with a warning first).
 - **Vegas neon.** The resort towers and casino roofs on the Strip now have neon bands round their tops, and the towers have light strips up their corners.
 
 The work from the other Claude window (new street bikes, `transit.js` station walkthroughs, building parts) is included in these changes. A snapshot of it from before this update is kept at git ref `refs/backup/other-session`.

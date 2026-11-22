@@ -244,11 +244,13 @@ const GradeShader = {
   uniforms: {
     tDiffuse: { value: null }, vignette: { value: 0.34 }, saturation: { value: 1.12 }, contrast: { value: 1.08 }, warmth: { value: 0.02 },
     shadowTint: { value: new THREE.Color('#1e3a52') }, lightTint: { value: new THREE.Color('#ffd7a0') }, split: { value: 0.12 },
-    texel: { value: new THREE.Vector2(1 / 1280, 1 / 720) }, sharpen: { value: 0.28 }, fringe: { value: 0.0009 }, grain: { value: 0.022 }, time: { value: 0 },
+    // (no film grain or sharpening to speak of: on a lowered render resolution both read as a grainy picture)
+    texel: { value: new THREE.Vector2(1 / 1280, 1 / 720) }, sharpen: { value: 0.08 }, fringe: { value: 0.0 }, grain: { value: 0.0 }, time: { value: 0 },
+    lift: { value: 0.0 },
   },
   vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
   fragmentShader: [
-    'uniform sampler2D tDiffuse; uniform float vignette, saturation, contrast, warmth, split, sharpen, fringe, grain, time;',
+    'uniform sampler2D tDiffuse; uniform float vignette, saturation, contrast, warmth, split, sharpen, fringe, grain, time, lift;',
     'uniform vec3 shadowTint, lightTint; uniform vec2 texel; varying vec2 vUv;',
     'float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }',
     'vec3 toSRGB(vec3 c) { return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }',
@@ -269,6 +271,7 @@ const GradeShader = {
     '  c.rgb = mix(c.rgb, c.rgb * lightTint * 1.15, split * smoothstep(0.5, 1.0, l));',
     '  c.rgb += vec3(warmth, warmth * 0.3, -warmth) * (1.0 - l);',
     '  c.rgb *= 1.0 - vignette * smoothstep(0.25, 0.85, length(d * vec2(1.25, 1.0)));',
+    '  c.rgb = lift * shadowTint * 2.5 + c.rgb * (1.0 - lift);',          // smoggy lifted blacks, tinted
     '  c.rgb += (hash(vUv * 1000.0 + time) - 0.5) * grain;',
     '  gl_FragColor = vec4(clamp(c.rgb, 0.0, 1.0), c.a);',
     '}'].join('\n'),
@@ -311,7 +314,7 @@ function sizePost() {
   const w = Math.max(1, stage.clientWidth), h = Math.max(1, stage.clientHeight), pr = renderer.getPixelRatio();
   composer.setPixelRatio(pr); composer.setSize(w, h);
   bloomPass.resolution.set(w * pr / 2, h * pr / 2);
-  if (gradePass) gradePass.uniforms.texel.value.set(1 / (w * pr), 1 / (h * pr));
+  if (gradePass) { gradePass.uniforms.texel.value.set(1 / (w * pr), 1 / (h * pr)); gradePass.uniforms.sharpen.value = pr < 0.95 ? 0 : 0.08; }
   fxaaPass.material.uniforms.resolution.value.set(1 / (w * pr), 1 / (h * pr));
 }
 function applyGrade() {
@@ -341,7 +344,8 @@ function governFrame(ms, active) {
   const target = quality === 'ultra' ? 33.3 : 20, maxPr = maxPixelRatio();
   let pr = GOV.pr;
   if (GOV.ema > target * 1.12) {
-    if (pr > 0.5) pr = Math.max(0.5, pr * 0.85);
+    // (not below 0.65: lower than that the picture turns to grain; pull in the draw distance instead)
+    if (pr > 0.65) pr = Math.max(0.65, pr * 0.85);
     else if (GOV.dropRadius < 2 && GOV.ema > target * 1.35) { GOV.dropRadius++; }
   } else if (GOV.ema < target * 0.75) {
     if (GOV.dropRadius > 0 && GOV.ema < target * 0.6) GOV.dropRadius--;
@@ -696,7 +700,7 @@ function addGroundDetail(mat) {
       .replace('#include <map_fragment>', [
         '#include <map_fragment>',
         'float dFine = texture2D(detailMap, vDetUV * 0.45).r, dBig = texture2D(detailMap, vDetUV * 0.012).g;',
-        'vec3 noiseCol = diffuseColor.rgb * (0.72 + 0.56 * dFine) * (0.85 + 0.3 * dBig);',
+        'vec3 noiseCol = diffuseColor.rgb * (0.88 + 0.24 * dFine) * (0.85 + 0.3 * dBig);',
         'vec3 gt = texture2D(grassMap, vDetUV / 3.0).rgb; gt = gt * gt * (gt * 0.3 + 0.7);',
         'vec3 grassCol = diffuseColor.rgb * gt / max(grassAvg, vec3(0.01)) * (0.85 + 0.3 * dBig);',
         'float green = hasGrass * smoothstep(0.0, 0.03, diffuseColor.g - max(diffuseColor.r, diffuseColor.b) * 0.9);',
