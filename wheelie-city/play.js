@@ -224,7 +224,7 @@ function renderBails() {
 
 // ---------------------------------------------------------------- input
 const keys = new Set();
-const GAME_KEYS = ['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'ShiftLeft', 'ShiftRight', 'KeyR', 'KeyM', 'KeyV', 'KeyN', 'KeyP', 'KeyE', 'KeyF', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'];
+const GAME_KEYS = ['Space', 'KeyB', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'ShiftLeft', 'ShiftRight', 'KeyR', 'KeyM', 'KeyV', 'KeyN', 'KeyP', 'KeyE', 'KeyF', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'];
 let noLock = false;
 addEventListener('keydown', (e) => {
   if (e.target && e.target.tagName === 'INPUT') return;          // typing in the map search box
@@ -385,10 +385,12 @@ function step(d) {
   }
 
   // Throttle, brake, lean
-  const want = keys.has('KeyW') ? 1 : 0;
+  // B is a burnout on one key (brake + full throttle): many laptop keyboards can't hold S + W + a steering key at once
+  const burnKey = keys.has('KeyB') && !handsOff && S.v < 3;
+  const want = keys.has('KeyW') || burnKey ? 1 : 0;
   if (handsOff) S.thr = S.thrLock;
   else S.thr += (want - S.thr) * Math.min(1, d * (want > S.thr ? 7 : 14));
-  const brake = keys.has('KeyS') && !handsOff ? 1 : 0;
+  const brake = (keys.has('KeyS') || burnKey) && !handsOff ? 1 : 0;
   const leanKey = (keys.has('ShiftLeft') || keys.has('ShiftRight') ? 1 : 0) - (keys.has('KeyQ') ? 1 : 0);
   const leanCtl = (T.nofoot.on ? 0.5 : 1) * (T.knee.on ? 0.75 : 1) * (T.high.on ? 0 : 1) * (T.stand.on ? 1.6 : 1);
   S.lean += (clamp((S.leanIn + leanKey) * leanCtl, -1, 1) - S.lean) * Math.min(1, d * 8);
