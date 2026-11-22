@@ -185,6 +185,87 @@ function makePed(r) {
   for (const k of ['Hit_Chest', 'Death01']) if (actions[k]) { actions[k].setLoop(THREE.LoopOnce); actions[k].clampWhenFinished = true; }
   return { root, mixer, actions, cur: null };
 }
+// ---------------------------------------------------------------- the rider
+// The bike's rider is a real body too. The old built rider stays as an invisible guide: its limb groups are what the
+// tricks, standing, no-hands and the crash ragdoll move, and markers in them say where the hips, neck, hands, feet,
+// elbows and knees should be. Each frame the body is bent to match (aiming the spine and neck, two-bone IK for arms
+// and legs). The real helmet stays on the guide's head.
+const _ra = new THREE.Vector3(), _rb = new THREE.Vector3(), _rc = new THREE.Vector3(), _rd = new THREE.Vector3(), _re = new THREE.Vector3();
+const _rq1 = new THREE.Quaternion(), _rq2 = new THREE.Quaternion(), _rq3 = new THREE.Quaternion();
+function aimBone(bone, child, target) {
+  // turn a bone (in world space) so that its child joint points at target
+  const p = bone.getWorldPosition(_ra), c = child.getWorldPosition(_rb);
+  const from = _rc.subVectors(c, p), to = _rd.subVectors(target, p);
+  if (from.lengthSq() < 1e-10 || to.lengthSq() < 1e-10) return;
+  from.normalize(); to.normalize();
+  const dq = _rq1.setFromUnitVectors(from, to), bq = bone.getWorldQuaternion(_rq2), pq = bone.parent.getWorldQuaternion(_rq3).invert();
+  bone.quaternion.copy(pq.multiply(dq.multiply(bq)));
+  bone.updateMatrixWorld(true);
+}
+function twoBoneIK(a, b, c, target, pole) {
+  const A = a.getWorldPosition(new THREE.Vector3()), B = b.getWorldPosition(new THREE.Vector3()), Cc = c.getWorldPosition(new THREE.Vector3());
+  const la = A.distanceTo(B), lb = B.distanceTo(Cc);
+  const dir = new THREE.Vector3().subVectors(target, A); let d = dir.length();
+  if (d < 1e-6) return;
+  dir.divideScalar(d); d = Math.min(d, (la + lb) * 0.999);
+  const x = (la * la - lb * lb + d * d) / (2 * d), h = Math.sqrt(Math.max(0, la * la - x * x));
+  const side = new THREE.Vector3().subVectors(pole, A); side.addScaledVector(dir, -side.dot(dir));
+  if (side.lengthSq() < 1e-8) side.set(0, 1, 0).addScaledVector(dir, -dir.y);
+  side.normalize();
+  const elbow = A.clone().addScaledVector(dir, x).addScaledVector(side, h);
+  aimBone(a, b, elbow);
+  aimBone(b, c, A.clone().addScaledVector(dir, d));
+}
+function attachRiderModel(r) {
+  if (!r || r.model || !PEOPLE.ready || !r.mk) return;
+  const root = THREE.SkeletonUtils.clone(PEOPLE.male.scene);
+  let body = null; const extras = [];
+  root.traverse((o) => { if (o.isSkinnedMesh) { if (o.name === PEOPLE.male.bodyName) body = o; else extras.push(o); } });
+  const skin = new THREE.Color('#ffffff').lerp(new THREE.Color(riderLook.skin), 0.55).getHexString();
+  body.material = skinMat('male', 'light', '#' + skin);
+  for (const o of extras) o.visible = false;              // brows and eyes are inside the helmet
+  const G = PEOPLE.garments.male, parent = body.parent;
+  const bindTo = (geo, mat) => { const m = new THREE.SkinnedMesh(geo, mat); m.bind(body.skeleton, body.bindMatrix); m.position.copy(body.position); m.quaternion.copy(body.quaternion); m.scale.copy(body.scale); parent.add(m); return m; };
+  bindTo(G.longTop, clothMat(riderLook.jersey, 'jersey', 0.85));
+  bindTo(G.trousers, clothMat(riderLook.pants, 'denim', 0.85));
+  bindTo(G.shoes, clothMat('#e8e8e4', 'leather', 0.5));       // MX boots
+  root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
+  const bone = (n) => root.getObjectByName(n);
+  const B = { pelvis: bone('pelvis'), spine: bone('spine_01'), neck: bone('neck_01'), head: bone('Head'),
+    ua: [bone('upperarm_l'), bone('upperarm_r')], la: [bone('lowerarm_l'), bone('lowerarm_r')], hand: [bone('hand_l'), bone('hand_r')],
+    th: [bone('thigh_l'), bone('thigh_r')], ca: [bone('calf_l'), bone('calf_r')], ft: [bone('foot_l'), bone('foot_r')] };
+  const rest = []; root.traverse((o) => { if (o.isBone) rest.push([o, o.quaternion.clone(), o.position.clone()]); });
+  r.rider.add(root);
+  // size the body to the guide: hips to neck
+  root.updateMatrixWorld(true);
+  const modelSpan = B.pelvis.getWorldPosition(new THREE.Vector3()).distanceTo(B.neck.getWorldPosition(new THREE.Vector3())) / r.rider.getWorldScale(new THREE.Vector3()).x;
+  const guideSpan = r.mk.hip.getWorldPosition(new THREE.Vector3()).distanceTo(r.mk.neck.getWorldPosition(new THREE.Vector3())) / r.rider.getWorldScale(new THREE.Vector3()).x;
+  root.scale.setScalar(guideSpan / (modelSpan || 1));
+  // the guide's own meshes go invisible, all but the helmet
+  r.rider.traverse((o) => { if (o.isMesh && !o.isSkinnedMesh) { let p = o, inHead = false; while (p) { if (p === r.head) { inHead = true; break; } p = p.parent; } if (!inHead) o.visible = false; } });
+  r.model = { root, B, rest };
+}
+function updateRiderModel(r) {
+  const M = r && r.model; if (!M) return;
+  const { root, B } = M, mk = r.mk;
+  for (const [b, q, p] of M.rest) { b.quaternion.copy(q); b.position.copy(p); }
+  r.rider.updateWorldMatrix(true, false);
+  root.updateMatrixWorld(true);
+  // hips onto the seat
+  const hip = mk.hip.getWorldPosition(_re), pel = B.pelvis.getWorldPosition(new THREE.Vector3());
+  root.position.add(r.rider.worldToLocal(hip.clone()).sub(r.rider.worldToLocal(pel)));
+  root.updateMatrixWorld(true);
+  // lean the body to the guide's chest, then the neck to the helmet
+  aimBone(B.spine, B.neck, mk.neck.getWorldPosition(new THREE.Vector3()));
+  aimBone(B.neck, B.head, mk.headBase.getWorldPosition(new THREE.Vector3()));
+  // arms to the bars (or wherever a trick put the hands), legs to the pegs
+  for (let s = 0; s < 2; s++) {
+    twoBoneIK(B.ua[s], B.la[s], B.hand[s], mk.hand[s].getWorldPosition(new THREE.Vector3()), mk.elbow[s].getWorldPosition(new THREE.Vector3()));
+    twoBoneIK(B.th[s], B.ca[s], B.ft[s], mk.foot[s].getWorldPosition(new THREE.Vector3()), mk.knee[s].getWorldPosition(new THREE.Vector3()));
+  }
+  // first person: no head in front of the camera
+  B.head.scale.setScalar(r.head.visible ? 0.9 : 0.001);
+}
 function personPlay(m, name, fade = 0.3, speed = 1) {
   const a = m.actions[name]; if (!a) return;
   a.timeScale = speed;

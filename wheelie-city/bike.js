@@ -21,8 +21,9 @@ function buildBike() {
   if (rig) {
     if (rig.ragdoll) { scene.remove(rig.ragdoll); }
     scene.remove(rig.root);
-    rig.root.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
-    rig.rider.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+    // (skinned meshes are the realistic rider: their geometry is shared with the pedestrians, so it stays)
+    rig.root.traverse((o) => { if (o.geometry && !o.isSkinnedMesh) o.geometry.dispose(); });
+    rig.rider.traverse((o) => { if (o.geometry && !o.isSkinnedMesh) o.geometry.dispose(); });
   }
   const B = BIKES[bikeKey], R = B.R, Rf = B.Rf || R, L = B.L, ys = B.seat - R;   // ys: seat top above rear axle
   const yF = Rf - R;                                                             // front axle height relative to rear axle
@@ -231,6 +232,9 @@ function buildBike() {
   // pelvis and seat of the pants
   lathe(rider, [[0.0, 0], [0.15, 0.02], [0.175, 0.3], [0.165, 0.7], [0.0, 1]], dark, HIP.clone().add(V3(0, -0.1, -0.02)), HIP.clone().add(V3(0, 0.12, 0.02)), 1.2, 0.85);
   const limbs = {};
+  // markers for the realistic body (people.js) to follow: index 0 = left (+x), 1 = right
+  const mark = (parent, p) => { const o = new THREE.Object3D(); o.position.copy(p); parent.add(o); return o; };
+  const mk = { hip: upper, hand: [], elbow: [], foot: [], knee: [] };
   for (const s of [-1, 1]) {
     const side = s > 0 ? 'L' : 'R';
     const hip = V3(s * 0.1, ys + 0.08, 0.36), foot = V3(s * 0.17, 0.37 - R, 0.66);
@@ -258,6 +262,11 @@ function buildBike() {
     blob(arm, hd, 0.047, glove, 1.05, 0.85, 1.3);
     blob(arm, hd.clone().add(V3(0, 0.02, 0.035)), 0.03, glove, 1.4, 0.7, 0.9);
     limbs['leg' + side] = leg; limbs['arm' + side] = arm;
+    const i = s > 0 ? 0 : 1;
+    mk.hand[i] = mark(arm, hd.clone().add(V3(0, 0, -0.03)));
+    mk.elbow[i] = mark(arm, e.clone().add(V3(s * 0.25, -0.15, -0.25)));
+    mk.foot[i] = mark(leg, ankle);
+    mk.knee[i] = mark(leg, k.clone().add(V3(s * 0.08, 0.1, 0.4)));
   }
   // torso: waist to chest to shoulders, slightly hunched over the bars; number board on the back
   const waist = U(0, ys + 0.1, 0.37), neckBase = U(0, ys + 0.68, 0.53);
@@ -267,6 +276,7 @@ function buildBike() {
   lathe(upper, [[0.055, 0], [0.05, 1]], skinM, neckBase, U(0, ys + 0.78, 0.58), 1, 1, 10);
   // MX helmet: shell, long chin bar, peak, goggles on the strap
   const head = new THREE.Group(); head.position.copy(U(HEADP.x, HEADP.y, HEADP.z)); upper.add(head);
+  mk.neck = mark(upper, neckBase); mk.headBase = mark(head, V3(0, -0.07, -0.02));
   blob(head, V3(0, 0.01, -0.01), 0.155, shell, 0.94, 1, 1.12);
   const chin = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 10, -Math.PI * 0.45, Math.PI * 0.9, Math.PI * 0.45, Math.PI * 0.45), shell);
   chin.scale.set(0.95, 0.85, 1.45); chin.position.set(0, -0.045, 0.06); head.add(chin);
@@ -292,5 +302,7 @@ function buildBike() {
 
   scene.add(root);
   rig = { root, body, wheels, rider, upper, head, eye, chest, barCam, dashCv, dashTex, B, paint, accent, ...limbs,
-    riderHome: { p: rider.position.clone(), q: rider.quaternion.clone() }, upperHome: upper.rotation.clone(), ragdoll: null };
+    riderHome: { p: rider.position.clone(), q: rider.quaternion.clone() }, upperHome: upper.rotation.clone(), ragdoll: null, mk };
+  // the realistic rider body, once the people models have loaded (else when they do: life.js)
+  if (typeof attachRiderModel === 'function') attachRiderModel(rig);
 }

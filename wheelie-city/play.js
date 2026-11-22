@@ -310,6 +310,34 @@ function gasPower(B, d) {
   const curve = e.curve === 'two' ? 0.16 + 0.84 * smooth(0.42, 0.86, x) - 0.15 * smooth(0.95, 1.0, x) : clamp(0.28 + 1.45 * x - 0.73 * x * x, 0, 1);
   return B.power * curve * (S.shiftT > 0 ? 0.04 : 1) * (S.limiter ? 0.35 : 1) * (1 + S.clutchDump * 0.6);
 }
+// ---- burnouts and donuts
+function burnoutStep(B, d, grip) {
+  if (!S.burnT) { S.burnT = 0; S.burnYaw = 0; S.burnMark = 0; S.burnSmoke = 0; popup('Burnout', ''); }
+  S.burnT += d;
+  // steering swings the back of the bike round the front wheel, which stays planted
+  const steer = clamp(S.steerMouse + (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0), -1, 1);
+  const rate = -steer * 1.9 * Math.min(1, S.burnSpin / 12) * clamp(grip, 0.5, 1);
+  if (Math.abs(rate) > 0.01) {
+    const fx0 = Math.sin(S.psi), fz0 = Math.cos(S.psi), frontX = S.x + fx0 * B.L, frontZ = S.z + fz0 * B.L;
+    S.psi += rate * d;
+    S.x = frontX - Math.sin(S.psi) * B.L; S.z = frontZ - Math.cos(S.psi) * B.L;
+    S.burnYaw += Math.abs(rate * d);
+    if (S.burnYaw >= TAU) { S.burnYaw -= TAU; S.donuts = (S.donuts || 0) + 1; const pts = 500; banked += pts; popup(`Donut +${pts}`, 'good'); }
+    S.roll = steer * -0.25;
+  }
+  // rubber on the road: marks as the back wheel moves, and a darker patch while it spins on the spot
+  const fx = Math.sin(S.psi), fz = Math.cos(S.psi);
+  S.burnMark += d;
+  if (S.onRoad && S.burnSpin > 6 && S.burnMark > (Math.abs(rate) > 0.2 ? 0.035 : 0.25)) { S.burnMark = 0; addSkid(S.x + (Math.random() - 0.5) * 0.05, S.z + (Math.random() - 0.5) * 0.05, S.psi + (Math.random() - 0.5) * 0.2, S.y); }
+  // tyre smoke pours off the back wheel and drifts up and back
+  S.burnSmoke += d * Math.min(1, S.burnSpin / 15) * (S.surface === 'road' || S.surface === 'pave' ? 30 : 10);
+  while (S.burnSmoke >= 1) { S.burnSmoke -= 1; spawnSmoke(S.x - fx * 0.25, S.y + 0.25, S.z - fz * 0.25, -fx * 2.5, -fz * 2.5, S.surface === 'road' || S.surface === 'pave' ? 0.8 : 0.5); }
+}
+function endBurnout() {
+  const secs = S.burnT || 0, pts = Math.round(secs * 90);
+  if (secs > 1) { banked += pts; popup(`Burnout ${secs.toFixed(1)}s +${pts}`, 'good'); }
+  S.burnT = 0; S.burnYaw = 0;
+}
 function step(d) {
   const B = BIKES[bikeKey];
   S.steerMouse *= Math.exp(-d * 2.6);
@@ -368,20 +396,35 @@ function step(d) {
   S.wob += ((Math.random() - 0.5) * 7 * wobble - S.wob * 1.5) * d;
   if (!wobble) S.wob *= Math.exp(-d * 4);
 
+  // Burnout: brake held with the throttle pinned while (nearly) stopped. The front brake holds the bike while the back
+  // wheel spins up, smokes and lays rubber; steer to swing the back round the front wheel (donuts); let go of the
+  // brake to launch.
+  const burning = brake && S.thr > 0.6 && S.v < 3 && S.theta < 0.05 && !anyTrick && S.surface !== 'water';
+  S.burnSpin = burning ? Math.min(30, (S.burnSpin || 0) + d * 40) : Math.max(0, (S.burnSpin || 0) - d * 45);
+
   // Powertrain: electric is torque-limited then flat power; gas has gears, a power curve and a clutch
   const m = B.mass + 75;
   let P = B.power;
   if (B.type === 'gas') P = gasPower(B, d); else S.rpm = S.v / (TAU * B.R) * 60 * B.motor.ratio;
+  if (S.burnSpin > 0.5) {
+    // the engine revs with the spinning back wheel, not the stopped bike
+    const spinRpm = B.type === 'gas' ? B.engine.redline * (0.55 + 0.38 * Math.min(1, S.burnSpin / 20)) * (0.97 + Math.random() * 0.03) : S.burnSpin / (TAU * B.R) * 60 * B.motor.ratio;
+    S.rpm = Math.max(S.rpm, spinRpm);
+  }
+  if (burning) burnoutStep(B, d, grip);
+  else if (S.burnT > 0) endBurnout();
   const traction = B.traction * clamp(grip, 0.35, 1.1);
   const motor = S.thr * Math.min(traction, P / (m * Math.max(S.v, 2)));
   const engBrake = B.type === 'gas' ? 0.8 * (S.rpm / B.engine.redline) * (1 - S.thr) * (S.v > 1 ? 1 : 0) : 0.3 * (1 - S.thr) * (S.v > 1 ? 1 : 0);
   const brakeDecel = brake * (S.theta > 0.05 ? 5.5 : 9) * clamp(grip, 0.4, 1.1);
-  let a = motor - B.drag * S.v * S.v - (S.v > 0.1 ? sf.roll : 0) - brakeDecel - engBrake;
+  let a = burning ? -6 : motor - B.drag * S.v * S.v - (S.v > 0.1 ? sf.roll : 0) - brakeDecel - engBrake;
   if (S.v <= 0 && a < 0) a = 0;
   S.v = Math.max(0, S.v + a * d);
   S.susp += ((-a * 0.012) - S.susp) * Math.min(1, d * 8);
-  // Skid: hard braking near the grip limit
+  // Skid: hard braking near the grip limit (and the screech of a burnout)
   S.skid = brake && S.v > 6 && brakeDecel > 7.2 * grip ? clamp((S.v - 6) / 20, 0.1, 0.35) : 0;
+  if (S.burnSpin > 2) S.skid = Math.max(S.skid, Math.min(0.4, S.burnSpin / 60));
+  if (burning) a = 0;          // (no wheelie from a burnout)
 
   // Wheelie: pitch about the rear axle. Acceleration lifts (a·sinφ), gravity pulls down (g·cosφ).
   const phi = PHI0 + S.lean * 0.2 + S.theta + 0.08 * Vv.stand + 0.05 * Vv.high;
@@ -681,6 +724,46 @@ FX.skids = (() => {
   im.count = 0; im.frustumCulled = false; scene.add(im);
   return { im, N, next: 0 };
 })();
+// Tyre smoke: soft puffs that grow, rise, drift and thin out
+FX.smoke = (() => {
+  const N = 600, g = new THREE.BufferGeometry(), pos = new Float32Array(N * 3).fill(-1000), age = new Float32Array(N), shade = new Float32Array(N);
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aAge', new THREE.BufferAttribute(age, 1)); g.setAttribute('aShade', new THREE.BufferAttribute(shade, 1));
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { uPx: { value: 600 } }, transparent: true, depthWrite: false,
+    // (the renderer uses a logarithmic depth buffer: hand-written shaders must write depth the same way)
+    vertexShader: '#include <common>\n#include <logdepthbuf_pars_vertex>\nattribute float aAge; attribute float aShade; uniform float uPx; varying float vA; varying float vS;\n' +
+      'void main() { vA = aAge; vS = aShade; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv;\n' +
+      '  gl_PointSize = aAge >= 1.0 ? 0.0 : uPx * (0.5 + 2.6 * sqrt(aAge)) / max(0.5, -mv.z);\n#include <logdepthbuf_vertex>\n}',
+    fragmentShader: '#include <common>\n#include <logdepthbuf_pars_fragment>\nvarying float vA; varying float vS;\n' +
+      'void main() {\n#include <logdepthbuf_fragment>\n  vec2 c = gl_PointCoord - 0.5; float r = dot(c, c) * 4.0; if (r > 1.0) discard;\n' +
+      '  float a = (1.0 - r) * (1.0 - r) * (1.0 - vA) * min(1.0, vA * 12.0) * 0.24;\n' +
+      '  gl_FragColor = vec4(vec3(vS), a); }',
+  });
+  const p = new THREE.Points(g, mat); p.frustumCulled = false; p.renderOrder = 3; scene.add(p);
+  return { p, pos, age, shade, vel: new Float32Array(N * 3), life: new Float32Array(N), N, next: 0, live: 0 };
+})();
+function spawnSmoke(x, y, z, vx, vz, shade) {
+  const F = FX.smoke, i = F.next = (F.next + 1) % F.N;
+  F.pos.set([x + (Math.random() - 0.5) * 0.3, y, z + (Math.random() - 0.5) * 0.3], i * 3);
+  F.vel.set([vx * (0.5 + Math.random()) + (Math.random() - 0.5) * 1.2, 0.5 + Math.random() * 0.9, vz * (0.5 + Math.random()) + (Math.random() - 0.5) * 1.2], i * 3);
+  F.life[i] = 2.4 + Math.random() * 1.6; F.age[i] = 0.001; F.shade[i] = shade * (0.85 + Math.random() * 0.15);
+  F.live = 4.5;
+}
+function updateSmoke(d) {
+  const F = FX.smoke; if (F.live <= 0) return;
+  F.live -= d;
+  const wind = 0.6 * (WX.rain || 0) + 0.3;
+  for (let i = 0; i < F.N; i++) {
+    if (F.age[i] <= 0 || F.age[i] >= 1) continue;
+    F.age[i] = Math.min(1, F.age[i] + d / F.life[i]);
+    const k = Math.exp(-d * 1.6);
+    F.vel[i * 3] *= k; F.vel[i * 3 + 2] *= k; F.vel[i * 3 + 1] = F.vel[i * 3 + 1] * Math.exp(-d * 0.6) + 0.15 * d;
+    F.pos[i * 3] += (F.vel[i * 3] + wind) * d; F.pos[i * 3 + 1] += F.vel[i * 3 + 1] * d; F.pos[i * 3 + 2] += F.vel[i * 3 + 2] * d;
+  }
+  // points are sized in pixels: one metre at one metre away
+  F.p.material.uniforms.uPx.value = renderer ? renderer.domElement.height / (2 * Math.tan(camera.fov * Math.PI / 360)) * 0.9 : 600;
+  const ga = F.p.geometry.attributes; ga.position.needsUpdate = true; ga.aAge.needsUpdate = true; ga.aShade.needsUpdate = true;
+}
 function spawnDebris(at, vel, n, mats, glass) {
   for (let k = 0; k < n; k++) {
     const p = FX.debris.find((x) => x.life <= 0) || FX.debris[Math.floor(Math.random() * FX.debris.length)];
@@ -715,6 +798,7 @@ function addSkid(x, z, psi, y) {
   F.im.setMatrixAt(F.next, m4); F.next = (F.next + 1) % F.N; F.im.count = Math.min(F.N, F.im.count + 1); F.im.instanceMatrix.needsUpdate = true;
 }
 function updateFX(d) {
+  updateSmoke(d);
   for (const p of FX.debris) {
     if (p.life <= 0) continue;
     p.life -= d;
@@ -743,6 +827,7 @@ function clearFX() {
   for (const p of FX.debris) { p.life = 0; p.m.visible = false; }
   for (const F of [FX.sparks, FX.splash]) { F.life.fill(0); for (let i = 0; i < F.n; i++) F.pos[i * 3 + 1] = -100; F.p.geometry.attributes.position.needsUpdate = true; }
   FX.skids.im.count = 0; FX.skids.next = 0;
+  FX.smoke.age.fill(0); FX.smoke.live = 0.1;
 }
 let flashV = 0;
 function flash(v) { flashV = Math.max(flashV, v); }
@@ -1057,7 +1142,8 @@ function placeRig(dt) {
     rig.legR.rotation.set(0.7 * P.nofoot - 1.5 * P.high + 0.35 * P.stand - 0.9 * P.knee, 0, -0.8 * P.nofoot - 0.25 * P.high + 0.5 * P.knee);
   }
   const spin = S.crashed ? 0 : S.v * dt;
-  rig.wheels[0].rotation.x += spin / B.R; rig.wheels[1].rotation.x += spin / (B.Rf || B.R);
+  rig.wheels[0].rotation.x += (spin + (S.crashed ? 0 : (S.burnSpin || 0) * dt)) / B.R; rig.wheels[1].rotation.x += spin / (B.Rf || B.R);
+  if (rig.model) updateRiderModel(rig);        // the realistic body follows the posed guide rider (people.js)
 }
 function drawDash() {
   const g = rig.dashCv.getContext('2d'), B = BIKES[bikeKey];

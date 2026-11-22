@@ -56,7 +56,7 @@ function buildPeds() {
     }
     return;
   }
-  if (typeof loadPeople === 'function' && !PEOPLE.failed) loadPeople().then((ok) => { if (ok && MAP) buildPeds(); });
+  if (typeof loadPeople === 'function' && !PEOPLE.failed) loadPeople().then((ok) => { if (ok && MAP) buildPeds(); if (ok && typeof rig !== 'undefined' && rig) attachRiderModel(rig); });
   const N = quality === 'low' ? 14 : quality === 'ultra' ? 56 : quality === 'high' ? 40 : 28;
   for (let i = 0; i < N; i++) {
     const r = mulberry(i * 977 + 13), skin = pick(r, PED_SKIN), top = pick(r, PED_TOP), legs = pick(r, PED_LEGS), hair = pick(r, PED_HAIR);

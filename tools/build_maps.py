@@ -352,6 +352,7 @@ def build(key, osmdir):
         return best
     n_ov = 0
     bl = []
+    mall_idx = set()      # outlines that are malls / big stores (their parts get mall-height floors too)
     for ring, t in h.buildings:
         far = max(range(len(ring)), key=lambda i: (ring[i][0] - ring[0][0]) ** 2 + (ring[i][1] - ring[0][1]) ** 2)
         if far == 0: continue
@@ -368,6 +369,13 @@ def build(key, osmdir):
                 ht = overture_height(ring)
                 if ht: n_ov += 1
             if ht is None: ht = DEF_H[k] + (0 if area < 400 else min(10, area / 300))
+            # Malls and big stores: their floors are 5-6 m (high ceilings, skylights, atriums, roof plant), not an
+            # apartment's 3.2, so counted levels (OSM or Overture) left a 3-level mall at 11 m. Only where the real
+            # height isn't mapped.
+            big_shop = (t.get('shop') == 'mall' or t.get('building') in ('mall', 'retail', 'commercial', 'supermarket')
+                        or (k == 3 and area > 4000))
+            if big_shop and area > 2500 and not t.get('_part'):
+                ht = max(ht * 1.6, 12 + min(10, area / 4000))
         ht = max(2.5, min(600, ht))
         # big, detailed outlines (malls, stadiums): simplify harder instead of cutting them off
         tol = 0.5
@@ -389,6 +397,9 @@ def build(key, osmdir):
         if part: shop = 0; landmark = 0
         flags = shop | (2 if roof == 'dome' or (t.get('building') == 'stadium' and area > 15000) else 0) | (4 if roof in ('gabled', 'hipped', 'pyramidal') else 0) | (8 * landmark) | (16 * part)
         ni = sidx(nm) if nm and len(names) < 65000 else 0
+        if (t.get('shop') == 'mall' or t.get('building') in ('mall', 'retail', 'commercial', 'supermarket') or (k == 3 and area > 4000)) \
+                and area > 2500 and not part:
+            mall_idx.add(len(bl))
         bl.append((ring, k, ht, ni | (mat << 16) | (flags << 24), col))
     # An outline that holds tower parts drops to its shortest part (usually the podium); the parts rise from there.
     def point_in(ring, x, z):
@@ -406,12 +417,25 @@ def build(key, osmdir):
             for gx in range(int(min(xs) // G), int(max(xs) // G) + 1):
                 for gz in range(int(min(zs) // G), int(max(zs) // G) + 1):
                     grid.setdefault((gx, gz), []).append(i)
-        lower = {}
+        # The outline drops to its biggest part (by area): the podium under a tower, or a mall's main block. (Its
+        # shortest part was used before, and one small entrance canopy left Metropolis at Metrotown 5 m tall.)
+        def ring_area(r):
+            return 0.5 * abs(sum(r[i][0] * r[i - 1][1] - r[i - 1][0] * r[i][1] for i in range(len(r))))
+        inside_parts = {}
         for pi in parts:
             ring, _, pht, _, _ = bl[pi]
             cx = sum(q_[0] for q_ in ring) / len(ring); cz = sum(q_[1] for q_ in ring) / len(ring)
             for oi in grid.get((int(cx // G), int(cz // G)), []):
-                if point_in(bl[oi][0], cx, cz): lower[oi] = min(lower.get(oi, 1e9), pht)
+                if point_in(bl[oi][0], cx, cz): inside_parts.setdefault(oi, []).append(pi)
+        lower = {}
+        for oi, pis in inside_parts.items():
+            if oi in mall_idx:
+                # a mall mapped in parts: the parts are mall floors too
+                for pi in pis:
+                    ring, k, pht, ex, col = bl[pi]
+                    bl[pi] = (ring, k, max(pht * 1.6, min(pht + 8, 14), 18 if ring_area(ring) > 8000 else 0), ex, col)
+            big = max(pis, key=lambda pi: ring_area(bl[pi][0]))
+            lower[oi] = bl[big][2]
         for oi, h_ in lower.items():
             ring, k, ht, ex, col = bl[oi]
             bl[oi] = (ring, k, min(ht, h_), ex, col)
