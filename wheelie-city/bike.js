@@ -17,6 +17,29 @@ function gearTex(name, rx, ry) {
   if (!t) { t = TEX[name + '_n'].clone(); t.needsUpdate = true; t.repeat.set(rx, ry); t.wrapS = t.wrapT = THREE.RepeatWrapping; gearTexCache[k] = t; }
   return { normalMap: t, normalScale: new THREE.Vector2(0.6, 0.6) };
 }
+// A moulded fender: a curved plate following an arc (centre cy, cz, radius r, from angle a0 to a1, measured from
+// straight up, positive towards the front), width w, its edges curled down a little like real plastics.
+function fenderShell(cy, cz, r, a0, a1, w, curl = 0.035) {
+  const NA = 18, NX = 6, pos = [], idx = [];
+  for (let i = 0; i <= NA; i++) {
+    const a = a0 + (a1 - a0) * i / NA, sa = Math.sin(a), ca = Math.cos(a);
+    for (let j = 0; j <= NX; j++) {
+      const u = j / NX * 2 - 1, rr = r - curl * u * u;             // edges drop towards the wheel
+      pos.push(u * w / 2, cy + ca * rr, cz + sa * rr);
+    }
+  }
+  for (let i = 0; i < NA; i++) for (let j = 0; j < NX; j++) { const a = i * (NX + 1) + j, b = a + NX + 1; idx.push(a, b, a + 1, b, b + 1, a + 1); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
+// A frame side plate from a side profile [[z, y], ...] with an optional window, extruded to thickness t and bevelled
+function framePlate(outline, hole, t) {
+  const sh = new THREE.Shape(outline.map(([z, y]) => new THREE.Vector2(z, y)));
+  if (hole) sh.holes.push(new THREE.Path(hole.map(([z, y]) => new THREE.Vector2(z, y))));
+  const g = new THREE.ExtrudeGeometry(sh, { depth: t, bevelEnabled: true, bevelThickness: 0.008, bevelSize: 0.008, bevelSegments: 2, curveSegments: 4 });
+  g.rotateY(-Math.PI / 2); g.translate(t / 2, 0, 0);     // profile z -> world z, extruded across x, centred
+  return g;
+}
 function buildBike() {
   if (rig) {
     if (rig.ragdoll) { scene.remove(rig.ragdoll); }
@@ -25,7 +48,6 @@ function buildBike() {
     rig.root.traverse((o) => { if (o.geometry && !o.isSkinnedMesh) o.geometry.dispose(); });
     rig.rider.traverse((o) => { if (o.geometry && !o.isSkinnedMesh) o.geometry.dispose(); });
   }
-  if (BIKES[bikeKey].car) { rig = buildCarRig(BIKES[bikeKey], riderLook.bike === 'stock' ? BIKES[bikeKey].color : riderLook.bike); return; }
   const B = BIKES[bikeKey], R = B.R, Rf = B.Rf || R, L = B.L, ys = B.seat - R;   // ys: seat top above rear axle
   const yF = Rf - R;                                                             // front axle height relative to rear axle
   const gas = B.type === 'gas', st = B.style, road = st === 'sport' || st === 'naked';
@@ -82,7 +104,7 @@ function buildBike() {
   if (st === 'sport') for (const s of [-1, 1]) seg(body, BAR.clone().setX(s * 0.08), BAR.clone().setX(s * 0.24).add(V3(0, -0.02, -0.03)), 0.016, 0.016, black);   // clip-ons
   else seg(body, BAR.clone().setX(-0.4), BAR.clone().setX(0.4), 0.016, 0.016, black);
   for (const s of [-1, 1]) seg(body, BAR.clone().setX(s * (barW - 0.11)), BAR.clone().setX(s * barW), 0.022, 0.022, rubber);
-  cube(body, TOP.clone().add(V3(0, 0.03, 0)), 0.08, 0.06, 0.07, black);
+  rcube(body, TOP.clone().add(V3(0, 0.03, 0)), 0.08, 0.06, 0.07, black);
   for (const s of [-1, 1]) { const lv = seg(body, BAR.clone().setX(s * 0.28).add(V3(0, 0, 0.02)), BAR.clone().setX(s * 0.4).add(V3(0, -0.02, 0.09)), 0.007, 0.007, alloy); lv.castShadow = false; }
   // Dash
   const dashCv = document.createElement('canvas'); dashCv.width = 256; dashCv.height = 128;
@@ -97,37 +119,49 @@ function buildBike() {
     const scr = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 8, 0, TAU, 0, Math.PI * 0.45), M('#2a3440', 0.05, 0.6, { transparent: true, opacity: 0.55 }));
     scr.position.copy(onF(forkLen * 0.86).add(V3(0, 0, 0.1))); scr.rotation.x = 0.9; scr.scale.set(0.9, 1.0, 1.3); body.add(scr);
     for (const s of [-1, 1]) {
-      const side = cube(body, V3(s * 0.2, ys - 0.24, 1.0), 0.03, 0.42, 0.62, paint); side.rotation.set(-0.22, s * 0.12, 0); side.castShadow = true;
-      cube(body, V3(s * 0.205, ys - 0.24, 1.0), 0.032, 0.08, 0.5, accent).rotation.set(-0.22, s * 0.12, 0);
-      const mir = cube(body, onF(forkLen * 0.85).add(V3(s * 0.26, 0.0, 0.08)), 0.11, 0.06, 0.04, black); mir.rotation.y = s * 0.2;
+      const side = rcube(body, V3(s * 0.2, ys - 0.24, 1.0), 0.03, 0.42, 0.62, paint); side.rotation.set(-0.22, s * 0.12, 0); side.castShadow = true;
+      rcube(body, V3(s * 0.205, ys - 0.24, 1.0), 0.032, 0.08, 0.5, accent).rotation.set(-0.22, s * 0.12, 0);
+      const mir = rcube(body, onF(forkLen * 0.85).add(V3(s * 0.26, 0.0, 0.08)), 0.11, 0.06, 0.04, black); mir.rotation.y = s * 0.2;
     }
-    cube(body, V3(0, 0.0, 0.82), 0.3, 0.05, 0.5, black);   // belly pan
-    const fender = cube(body, V3(0, yF + Rf + 0.04, L + 0.03), 0.16, 0.03, 0.5, paint); fender.rotation.x = -0.1;
+    rcube(body, V3(0, 0.0, 0.82), 0.3, 0.05, 0.5, black);   // belly pan
+    const fender = rcube(body, V3(0, yF + Rf + 0.04, L + 0.03), 0.16, 0.03, 0.5, paint); fender.rotation.x = -0.1;
   } else if (st === 'naked') {
     // naked roadster: angular headlight and a small fly screen, bare engine
-    const hl = cube(body, onF(forkLen * 0.68).add(V3(0, 0, 0.14)), 0.2, 0.18, 0.14, black); hl.quaternion.copy(qF);
-    cube(body, onF(forkLen * 0.68).add(V3(0, 0, 0.215)), 0.15, 0.1, 0.02, lamp).quaternion.copy(qF);
-    const fly = cube(body, onF(forkLen * 0.86).add(V3(0, 0.02, 0.1)), 0.2, 0.16, 0.02, paint); fly.rotation.x = -0.5;
-    const fender = cube(body, V3(0, yF + Rf + 0.04, L + 0.03), 0.16, 0.03, 0.5, paint); fender.rotation.x = -0.1;
+    const hl = rcube(body, onF(forkLen * 0.68).add(V3(0, 0, 0.14)), 0.2, 0.18, 0.14, black); hl.quaternion.copy(qF);
+    rcube(body, onF(forkLen * 0.68).add(V3(0, 0, 0.215)), 0.15, 0.1, 0.02, lamp).quaternion.copy(qF);
+    const fly = rcube(body, onF(forkLen * 0.86).add(V3(0, 0.02, 0.1)), 0.2, 0.16, 0.02, paint); fly.rotation.x = -0.5;
+    const fender = rcube(body, V3(0, yF + Rf + 0.04, L + 0.03), 0.16, 0.03, 0.5, paint); fender.rotation.x = -0.1;
   } else if (st === 'grom') {
     const cowl = blob(body, onF(forkLen * 0.75).add(V3(0, 0, 0.08)), 0.13, paint, 1.2, 1, 0.8);
     blob(body, onF(forkLen * 0.75).add(V3(0, 0, 0.17)), 0.07, lamp, 1, 0.9, 0.4);
-    const fender = cube(body, V3(0, yF + Rf + 0.04, L + 0.02), 0.2, 0.03, 0.48, paint); fender.rotation.x = -0.05;
+    const fender = rcube(body, V3(0, yF + Rf + 0.04, L + 0.02), 0.2, 0.03, 0.48, paint); fender.rotation.x = -0.05;
     void cowl;
   } else {
-    const plate = cube(body, onF(forkLen * 0.68).add(V3(0, 0, 0.05)), 0.26, 0.3, 0.05, gas || st === 'varg' ? accent : accent); plate.quaternion.copy(qF);
+    const plate = rcube(body, onF(forkLen * 0.68).add(V3(0, 0, 0.05)), 0.26, 0.3, 0.05, gas || st === 'varg' ? accent : accent); plate.quaternion.copy(qF);
     blob(body, onF(forkLen * 0.68).add(V3(0, 0.02, 0.085)), 0.06, lamp, 1, 0.8, 0.4);
-    const fy = st === 'smc' ? yF + Rf + 0.05 : yF + Rf + 0.1;
-    const fender = cube(body, V3(0, fy, L + 0.06), 0.17, 0.03, 0.62, gas ? M('#f2f2f2', 0.4) : paint); fender.rotation.x = -0.14;
-    if (gas && st !== 'smc') fender.material = paint;
+    // front fender: a curved scoop over the wheel (high on the dirt bikes, hugging the tyre on the supermoto)
+    const lift = st === 'smc' ? 0.05 : 0.12, fm = gas && st !== 'smc' ? paint : gas ? M('#f2f2f2', 0.4) : paint;
+    const fender = new THREE.Mesh(fenderShell(yF, L, Rf + lift, -0.95, 0.85, 0.17), fm); fender.castShadow = true; body.add(fender);
+    fm.side = THREE.DoubleSide;
   }
 
   // Frame and swingarm
   const PIV = V3(0, 0.12, 0.56);
+  const eMoto = !gas && st !== 'varg';
   for (const s of [-1, 1]) {
     beam(body, V3(s * 0.075, 0, 0), PIV.clone().setX(s * 0.08), 0.03, 0.07, st === 'grom' ? alloy : frame);       // swingarm
+    if (eMoto) continue;           // (the e-motos get cast side plates instead: below)
     beam(body, onF(forkLen * 0.82, s * 0.06), V3(s * 0.08, ys - 0.12, 0.72), 0.03, 0.06, frame);                   // spars
     beam(body, V3(s * 0.08, ys - 0.12, 0.72), PIV.clone().setX(s * 0.08).add(V3(0, 0.06, 0)), 0.03, 0.05, frame);
+  }
+  if (eMoto) {
+    // Cast aluminium frame, Sur-Ron style: a side plate each side from the steering head down round the battery to
+    // the swingarm pivot and back up to the seat, open in the middle where the battery shows through
+    const H = onF(forkLen * 0.8), zH = H.z, yH = H.y, yS = ys - 0.1;
+    const outline = [[zH + 0.05, yH + 0.04], [zH + 0.09, yH - 0.1], [1.06, 0.06], [0.98, -0.03], [0.62, -0.03], [0.5, 0.08], [0.48, 0.2], [0.6, yS], [0.78, yS + 0.03], [zH - 0.06, yH + 0.06]];
+    const hole = [[zH - 0.02, yH - 0.08], [0.98, 0.1], [0.64, 0.05], [0.56, 0.16], [0.66, yS - 0.06], [0.8, yS - 0.03]];
+    const fg = framePlate(outline, hole, 0.03), fmat = frame;
+    for (const s of [-1, 1]) { const fp = new THREE.Mesh(fg, fmat); fp.position.x = s * 0.125; fp.castShadow = true; body.add(fp); }
   }
   // Shock with spring
   {
@@ -142,41 +176,41 @@ function buildBike() {
   if (!gas) {
     // E-moto: battery box, motor, belt/chain; Varg gets a fake tank and shrouds
     const bw = st === 'rtr' ? 0.21 : 0.22, bl = st === 'rtr' ? 0.42 : 0.48;
-    const box = cube(body, V3(0, midY, 0.86), bw, ys - 0.14, bl, st === 'varg' ? black : paint); box.castShadow = true;
-    cube(body, V3(0, midY, 0.86 + bl / 2 + 0.005), bw + 0.01, 0.08, 0.02, accent);
-    if (st === 'surron' || st === 'talaria') for (const s of [-1, 1]) { const p = cube(body, V3(s * (bw / 2 + 0.01), midY + 0.05, 0.86), 0.01, (ys - 0.14) * 0.55, bl * 0.8, accent); p.material = M(B.accent, 0.5, 0.1, { transparent: true, opacity: 0.85 }); }
+    const box = rcube(body, V3(0, midY, 0.86), bw, ys - 0.14, bl, st === 'varg' ? black : paint); box.castShadow = true;
+    rcube(body, V3(0, midY, 0.86 + bl / 2 + 0.005), bw + 0.01, 0.08, 0.02, accent);
+    if (st === 'surron' || st === 'talaria') for (const s of [-1, 1]) { const p = rcube(body, V3(s * (bw / 2 + 0.01), midY + 0.05, 0.86), 0.01, (ys - 0.14) * 0.55, bl * 0.8, accent); p.material = M(B.accent, 0.5, 0.1, { transparent: true, opacity: 0.85 }); }
     axle(body, V3(0, 0.08, 0.66), st === 'varg' ? 0.12 : 0.11, 0.17, st === 'varg' ? engineM : black, 20);
     beam(body, V3(-0.09, 0.14, 0.62), V3(-0.09, 0.07, 0), 0.012, 0.02, black);
     beam(body, V3(-0.09, 0.02, 0.62), V3(-0.09, -0.06, 0), 0.012, 0.02, black);
     if (st === 'varg') {
       const tank = blob(body, V3(0, ys + 0.02, 0.86), 0.16, paint, 1.0, 0.7, 1.7); tank.castShadow = true;
-      for (const s of [-1, 1]) { const sh = cube(body, V3(s * 0.15, ys - 0.06, 0.98), 0.03, 0.26, 0.34, accent); sh.rotation.y = s * 0.25; }
+      for (const s of [-1, 1]) { const sh = rcube(body, V3(s * 0.15, ys - 0.06, 0.98), 0.03, 0.26, 0.34, accent); sh.rotation.y = s * 0.25; }
     }
   } else {
     // Gas: engine cases, cylinder, head, tank, shrouds, exhaust
     const two = B.stroke === 2, eh = st === 'grom' ? 0.2 : road ? 0.3 : 0.26;
-    cube(body, V3(0, road ? 0.14 : 0.1, 0.72), st === 'grom' ? 0.26 : road ? 0.24 + 0.04 * (B.engine.cyl || 1) : 0.24, eh, road ? 0.48 : 0.42, engineM).castShadow = true;
+    rcube(body, V3(0, road ? 0.14 : 0.1, 0.72), st === 'grom' ? 0.26 : road ? 0.24 + 0.04 * (B.engine.cyl || 1) : 0.24, eh, road ? 0.48 : 0.42, engineM).castShadow = true;
     const cyl = new THREE.Group(); cyl.position.set(0, road ? 0.3 : 0.22, road ? 0.9 : 0.84); cyl.rotation.x = road ? -0.45 : -0.32; body.add(cyl);
     const cylH = st === 'grom' ? 0.18 : two ? 0.22 : 0.26;
     if (!road) for (let k = 0; k < 6; k++) { const f = new THREE.Mesh(new THREE.BoxGeometry(0.2 - k * 0.006, 0.012, 0.2), fin); f.position.y = 0.03 + k * (cylH / 6); cyl.add(f); }
     const c = new THREE.Mesh(new THREE.BoxGeometry(road ? 0.2 + 0.05 * (B.engine.cyl || 1) : 0.14, cylH, road ? 0.18 : 0.14), engineM); c.position.y = cylH / 2; cyl.add(c);
-    if (road) { const radi = cube(body, V3(0, 0.38, 1.05), 0.36, 0.3, 0.04, M('#2a2c30', 0.6, 0.5)); radi.rotation.x = -0.35; }
+    if (road) { const radi = rcube(body, V3(0, 0.38, 1.05), 0.36, 0.3, 0.04, M('#2a2c30', 0.6, 0.5)); radi.rotation.x = -0.35; }
     const head = new THREE.Mesh(new THREE.BoxGeometry(two ? 0.16 : 0.2, 0.07, two ? 0.16 : 0.2), two ? fin : engineM); head.position.y = cylH + 0.035; cyl.add(head);
     if (!two) { const vc = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.05, 0.16), M('#a31f1f', 0.4, 0.3)); vc.position.y = cylH + 0.09; cyl.add(vc); }
     axle(body, V3(0.13, 0.08, 0.68), 0.09, 0.02, M('#5a5d62', 0.35, 0.8), 18);    // clutch cover
     // tank and shrouds (radiators on the MX bikes)
     const tank = road ? blob(body, V3(0, ys + 0.02, 0.86), 0.2, paint, 1.15, 0.72, 1.45) : blob(body, V3(0, ys + (st === 'grom' ? 0.0 : -0.01), 0.9), st === 'grom' ? 0.17 : 0.15, paint, 1.15, 0.75, st === 'grom' ? 1.4 : 1.65); tank.castShadow = true;
     if (road) {
-      if (st === 'naked') for (const s of [-1, 1]) { const sh = cube(body, V3(s * 0.17, ys - 0.08, 0.98), 0.025, 0.2, 0.3, paint); sh.rotation.set(-0.2, s * 0.3, 0); }   // tank shrouds
+      if (st === 'naked') for (const s of [-1, 1]) { const sh = rcube(body, V3(s * 0.17, ys - 0.08, 0.98), 0.025, 0.2, 0.3, paint); sh.rotation.set(-0.2, s * 0.3, 0); }   // tank shrouds
     } else if (st === 'mx2' || st === 'mx4' || st === 'smc') {
       for (const s of [-1, 1]) {
-        const rad = cube(body, V3(s * 0.13, ys - 0.16, 0.98), 0.05, 0.24, 0.2, M('#2a2c30', 0.6, 0.5)); rad.rotation.y = s * 0.2;
-        const sh = cube(body, V3(s * 0.16, ys - 0.1, 0.98), 0.02, 0.3, 0.36, paint); sh.rotation.y = s * 0.28;
-        const nb = cube(body, V3(s * 0.135, ys - 0.12, 0.42), 0.02, 0.2, 0.34, M('#f2f2f2', 0.5));   // side number boards
+        const rad = rcube(body, V3(s * 0.13, ys - 0.16, 0.98), 0.05, 0.24, 0.2, M('#2a2c30', 0.6, 0.5)); rad.rotation.y = s * 0.2;
+        const sh = rcube(body, V3(s * 0.16, ys - 0.1, 0.98), 0.02, 0.3, 0.36, paint); sh.rotation.y = s * 0.28;
+        const nb = rcube(body, V3(s * 0.135, ys - 0.12, 0.42), 0.02, 0.2, 0.34, M('#f2f2f2', 0.5));   // side number boards
         nb.rotation.y = s * 0.05;
       }
     } else {
-      for (const s of [-1, 1]) cube(body, V3(s * 0.15, ys - 0.12, 0.82), 0.02, 0.18, 0.5, paint);
+      for (const s of [-1, 1]) rcube(body, V3(s * 0.15, ys - 0.12, 0.82), 0.02, 0.18, 0.5, paint);
     }
     // exhaust
     const P = (x, y, z) => V3(x, y, z);
@@ -199,15 +233,18 @@ function buildBike() {
   }
   // Seat, side panels, tail
   const seatL = st === 'grom' ? 0.62 : road ? 0.42 : 0.78;
-  cube(body, V3(0, ys - 0.03, road ? 0.6 : 0.55), st === 'grom' ? 0.27 : road ? 0.3 : 0.25, 0.08, seatL, black);
+  rcube(body, V3(0, ys - 0.03, road ? 0.6 : 0.55), st === 'grom' ? 0.27 : road ? 0.3 : 0.25, 0.08, seatL, black);
   if (road) {
-    const pil = cube(body, V3(0, ys + 0.06, 0.22), 0.2, 0.07, 0.3, black); pil.rotation.x = -0.12;          // pillion step
-    for (const s of [-1, 1]) { const tl = cube(body, V3(s * 0.11, ys - 0.02, 0.18), 0.03, 0.16, 0.62, paint); tl.rotation.set(-0.28, s * 0.08, 0); tl.castShadow = true; }
+    const pil = rcube(body, V3(0, ys + 0.06, 0.22), 0.2, 0.07, 0.3, black); pil.rotation.x = -0.12;          // pillion step
+    for (const s of [-1, 1]) { const tl = rcube(body, V3(s * 0.11, ys - 0.02, 0.18), 0.03, 0.16, 0.62, paint); tl.rotation.set(-0.28, s * 0.08, 0); tl.castShadow = true; }
   }
-  if (!gas) for (const s of [-1, 1]) { const p = cube(body, V3(s * 0.13, ys - 0.13, 0.62), 0.02, 0.16, 0.52, paint); p.rotation.y = s * 0.06; }
-  const tailP = cube(body, V3(0, ys + 0.02, 0.05), 0.2, 0.03, 0.5, road ? paint : gas ? M(st === 'grom' || st === 'smc' ? B.color : '#f2f2f2', 0.45) : paint); tailP.rotation.x = road ? -0.38 : -0.3;
-  cube(body, V3(0, ys + 0.1, -0.17), 0.12, 0.05, 0.03, tailLamp);
-  for (const s of [-1, 1]) cube(body, V3(s * 0.17, road ? 0.45 - R : 0.35 - R, road ? 0.52 : 0.64), 0.1, 0.025, 0.05, alloy);     // footpegs (rearsets on road bikes)
+  if (!gas) for (const s of [-1, 1]) { const p = rcube(body, V3(s * 0.13, ys - 0.13, 0.62), 0.02, 0.16, 0.52, paint); p.rotation.y = s * 0.06; }
+  // rear fender / tail: a curved shell over the back wheel (road bikes keep their tail cowl)
+  const tailMat = road ? paint : gas ? M(st === 'grom' || st === 'smc' ? B.color : '#f2f2f2', 0.45) : paint;
+  if (road) { const tailP = rcube(body, V3(0, ys + 0.02, 0.05), 0.2, 0.03, 0.5, tailMat); tailP.rotation.x = -0.38; }
+  else { tailMat.side = THREE.DoubleSide; const tf = new THREE.Mesh(fenderShell(0, 0, R + 0.16, -1.15, 0.55, 0.2, 0.04), tailMat); tf.castShadow = true; body.add(tf); }
+  rcube(body, V3(0, ys + 0.1, -0.17), 0.12, 0.05, 0.03, tailLamp);
+  for (const s of [-1, 1]) rcube(body, V3(s * 0.17, road ? 0.45 - R : 0.35 - R, road ? 0.52 : 0.64), 0.1, 0.025, 0.05, alloy);     // footpegs (rearsets on road bikes)
   body.traverse((o) => { if (o.isMesh && o.castShadow === false && o.geometry && !o.isInstancedMesh) o.castShadow = true; });
 
   // Rider, seated on the back of the seat for wheelies. Limbs pivot at hip and shoulder for tricks.
@@ -248,9 +285,9 @@ function buildBike() {
     const ankle = f.clone().add(V3(0, 0.07, -0.01)), bootTop = k.clone().lerp(ankle, 0.35);
     lathe(leg, [[0.058, 0], [0.066, 0.3], [0.06, 1]], dark, k, bootTop, 1, 1, 12);
     lathe(leg, [[0.07, 0], [0.074, 0.6], [0.079, 1]], bootM, ankle, bootTop, 1, 1.05, 14);
-    for (const t of [0.25, 0.5, 0.75]) { const p = ankle.clone().lerp(bootTop, t); cube(leg, p.add(V3(s * 0.07, 0, 0)), 0.012, 0.018, 0.05, buckle); }
+    for (const t of [0.25, 0.5, 0.75]) { const p = ankle.clone().lerp(bootTop, t); rcube(leg, p.add(V3(s * 0.07, 0, 0)), 0.012, 0.018, 0.05, buckle); }
     blob(leg, f.clone().add(V3(0, 0.035, 0.05)), 0.075, bootM, 0.85, 0.65, 1.75);
-    cube(leg, f.clone().add(V3(0, -0.005, 0.05)), 0.12, 0.025, 0.28, bootSole);
+    rcube(leg, f.clone().add(V3(0, -0.005, 0.05)), 0.12, 0.025, 0.28, bootSole);
     // arm: shoulder cap, upper arm, elbow guard, forearm, glove with knuckles
     const sh = U(s * 0.2, ys + 0.6, 0.52), hand = U(s * 0.37, BAR.y + 0.01, BAR.z);
     const elbow = sh.clone().lerp(hand, 0.5).add(V3(s * 0.1, -0.06, -0.06));
@@ -273,7 +310,7 @@ function buildBike() {
   const waist = U(0, ys + 0.1, 0.37), neckBase = U(0, ys + 0.68, 0.53);
   lathe(upper, [[0.15, 0], [0.155, 0.12], [0.175, 0.4], [0.19, 0.62], [0.19, 0.78], [0.15, 0.9], [0.07, 0.97], [0.0, 1]], jersey, waist, neckBase, 1.18, 0.72, 20);
   lathe(upper, [[0.158, 0], [0.16, 1]], glove, U(0, ys + 0.3, 0.42), U(0, ys + 0.36, 0.44), 1.19, 0.73, 20);
-  const back = cube(upper, U(0, ys + 0.44, 0.33), 0.2, 0.18, 0.01, glove); back.rotation.x = 0.28;
+  const back = rcube(upper, U(0, ys + 0.44, 0.33), 0.2, 0.18, 0.01, glove); back.rotation.x = 0.28;
   lathe(upper, [[0.055, 0], [0.05, 1]], skinM, neckBase, U(0, ys + 0.78, 0.58), 1, 1, 10);
   // MX helmet: shell, long chin bar, peak, goggles on the strap
   const head = new THREE.Group(); head.position.copy(U(HEADP.x, HEADP.y, HEADP.z)); upper.add(head);
@@ -282,8 +319,8 @@ function buildBike() {
   const chin = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 10, -Math.PI * 0.45, Math.PI * 0.9, Math.PI * 0.45, Math.PI * 0.45), shell);
   chin.scale.set(0.95, 0.85, 1.45); chin.position.set(0, -0.045, 0.06); head.add(chin);
   blob(head, V3(0, -0.095, 0.2), 0.03, black, 1.6, 0.8, 0.6);                     // mouth vent
-  const peak = road ? null : cube(head, V3(0, 0.125, 0.15), 0.23, 0.014, 0.16, shell, -0.32);
-  if (!road) cube(head, V3(0, 0.13, 0.15), 0.08, 0.016, 0.15, glove, -0.32);                  // peak stripe
+  const peak = road ? null : rcube(head, V3(0, 0.125, 0.15), 0.23, 0.014, 0.16, shell, -0.32);
+  if (!road) rcube(head, V3(0, 0.13, 0.15), 0.08, 0.016, 0.15, glove, -0.32);                  // peak stripe
   const strap = new THREE.Mesh(new THREE.TorusGeometry(0.158, 0.014, 6, 28), black); strap.rotation.x = Math.PI / 2; strap.scale.set(0.95, 1.13, 1); strap.position.set(0, 0.02, -0.01); head.add(strap);
   if (road) {
     // road helmet: one smoked visor across the face
@@ -292,7 +329,7 @@ function buildBike() {
   } else {
     const gog = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.06, 18, 1, true, -0.75, 1.5), black); gog.rotation.set(Math.PI / 2, 0, 0); gog.rotation.order = 'YXZ';
     gog.position.set(0, 0.02, 0.07); gog.scale.set(1, 1, 0.55); head.add(gog);
-    cube(head, V3(0, 0.02, 0.172), 0.165, 0.052, 0.008, lens);
+    rcube(head, V3(0, 0.02, 0.172), 0.165, 0.052, 0.008, lens);
   }
   void peak;
   rider.traverse((o) => { if (o.isMesh) o.castShadow = true; });

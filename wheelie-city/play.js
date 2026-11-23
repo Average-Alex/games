@@ -2,7 +2,7 @@
 'use strict';
 
 // ---------------------------------------------------------------- menu UI
-const bikeCat = (bk) => bk.car ? 'car' : bk.type !== 'gas' ? 'e' : bk.street ? 'street' : 'gas';
+const bikeCat = (bk) => bk.type !== 'gas' ? 'e' : bk.street ? 'street' : 'gas';
 let bikeTab = bikeCat(BIKES[bikeKey]);
 function buildCards() {
   const cc = $('#cityCards'); cc.innerHTML = '';
@@ -17,14 +17,13 @@ function buildCards() {
   $('#tabE').setAttribute('aria-pressed', String(bikeTab === 'e'));
   $('#tabG').setAttribute('aria-pressed', String(bikeTab === 'gas'));
   $('#tabS').setAttribute('aria-pressed', String(bikeTab === 'street'));
-  $('#tabC').setAttribute('aria-pressed', String(bikeTab === 'car'));
   for (const [k, bk] of Object.entries(BIKES)) {
     if (bikeCat(bk) !== bikeTab) continue;
     const b = document.createElement('button');
     b.type = 'button'; b.className = 'card'; b.setAttribute('aria-pressed', String(k === bikeKey));
     const bar = (lbl, v) => `<div class="stat">${lbl}<span><i style="width:${Math.round(v * 100)}%"></i></span></div>`;
-    const spec = `${Math.round(bk.power / 1000 * 1.341)} hp · ${Math.round(bk.vmax * 3.6)} km/h · ${bk.mass} kg${bk.car ? ` · ${bk.label}` : bk.type === 'gas' ? ` · ${bk.stroke}-stroke` : ''}`;
-    b.innerHTML = `<div class="br2">${bk.brand}</div><div class="nm">${bk.name}</div><div class="sub">${bk.blurb}</div><div class="sub">${spec}</div><div class="stats">${bar('Power', bk.bars.power)}${bar('Top speed', bk.bars.speed)}${bar('Weight', bk.bars.weight)}${bar(bk.car ? 'Handling' : 'Easy lift', bk.bars.ease)}</div>`;
+    const spec = `${Math.round(bk.power / 1000 * 1.341)} hp · ${Math.round(bk.vmax * 3.6)} km/h · ${bk.mass} kg${bk.type === 'gas' ? ` · ${bk.stroke}-stroke` : ''}`;
+    b.innerHTML = `<div class="br2">${bk.brand}</div><div class="nm">${bk.name}</div><div class="sub">${bk.blurb}</div><div class="sub">${spec}</div><div class="stats">${bar('Power', bk.bars.power)}${bar('Top speed', bk.bars.speed)}${bar('Weight', bk.bars.weight)}${bar('Easy lift', bk.bars.ease)}</div>`;
     b.addEventListener('click', () => { bikeKey = k; store.set('wc-bike2', k); buildCards(); buildBike(); sfx.setBike(); if (MAP) placeRig(0); });
     bc.appendChild(b);
   }
@@ -51,7 +50,6 @@ buildRiderOpts();
 $('#tabE').addEventListener('click', () => { bikeTab = 'e'; buildCards(); });
 $('#tabG').addEventListener('click', () => { bikeTab = 'gas'; buildCards(); });
 $('#tabS').addEventListener('click', () => { bikeTab = 'street'; buildCards(); });
-$('#tabC').addEventListener('click', () => { bikeTab = 'car'; buildCards(); });
 const povSel = $('#povSel');
 for (const [k, label] of POVS) { const o = document.createElement('option'); o.value = k; o.textContent = label; povSel.appendChild(o); }
 function setPov(p) {
@@ -240,7 +238,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyV' && state === 'play' && (WALK.on || (S.riding && RIDE.train))) { transitKey('KeyV'); }
   else if (e.code === 'KeyV' && state === 'play') { const i = POVS.findIndex((p) => p[0] === pov); setPov(POVS[(i + 1) % POVS.length][0]); popup(POVS[(i + 1) % POVS.length][1]); }
   if (state === 'play') {
-    if (e.code === 'Space' && !S.crashed && S.theta < 0.45 && S.popCd <= 0 && S.v > 1.5 && !BIKES[bikeKey].car) {   // (in a car Space is the handbrake)
+    if (e.code === 'Space' && !S.crashed && S.theta < 0.45 && S.popCd <= 0 && S.v > 1.5) {
       const B = BIKES[bikeKey];
       let kick = 1.3;
       if (B.type === 'gas') { const f = S.rpm / B.engine.redline; kick = 0.8 + 1.4 * f; S.clutchDump = 1; }
@@ -316,85 +314,13 @@ function gasPower(B, d) {
 function burnoutStep(B, d) {
   if (!S.burnT) { S.burnT = 0; S.burnMark = 0; S.burnSmoke = 0; popup('Burnout', ''); }
   S.burnT += d;
-  // the back tyre(s): one on a bike, a pair on a car
-  const fx = Math.sin(S.psi), fz = Math.cos(S.psi), rx = -fz, rz = fx;
-  const tyres = B.car ? [B.W / 2 - 0.13, -(B.W / 2 - 0.13)] : [0];
-  const paved = S.surface === 'road' || S.surface === 'pave';
   // a dark patch of rubber builds up under the spinning tyre
+  const fx = Math.sin(S.psi), fz = Math.cos(S.psi);
   S.burnMark += d;
-  if (S.onRoad && S.burnSpin > 6 && S.burnMark > 0.25) {
-    S.burnMark = 0;
-    for (const o of tyres) addSkid(S.x + rx * o + (Math.random() - 0.5) * 0.05, S.z + rz * o + (Math.random() - 0.5) * 0.05, S.psi + (Math.random() - 0.5) * 0.2, S.y);
-  }
-  // tyre smoke pours off the back and drifts up and away
-  S.burnSmoke += d * Math.min(1, S.burnSpin / 15) * (paved ? 30 : 10) * (B.car ? 1.6 : 1);
-  while (S.burnSmoke >= 1) {
-    S.burnSmoke -= 1;
-    const o = tyres[Math.floor(Math.random() * tyres.length)];
-    spawnSmoke(S.x + rx * o - fx * 0.25, S.y + 0.25, S.z + rz * o - fz * 0.25, -fx * 2.5 + rx * Math.sign(o) * 1.2, -fz * 2.5 + rz * Math.sign(o) * 1.2, paved ? 0.8 : 0.5);
-  }
-}
-// ---- drifting (cars): the nose (psi) and the direction of travel (psi - beta) part company. The handbrake (Space),
-// or the throttle in a rear-drive car mid-corner, or simply arriving too fast, swings the tail out; the throttle
-// holds it out, steering against the slide (countersteer) and the tyres pull it back; too far and it spins.
-// Turning right makes psi smaller; in a right-hand drift the nose points further right than the path (beta < 0).
-function carDrift(B, d, steerIn, grip, turnRate) {
-  const hb = keys.has('Space'), rwd = !B.awd, v = S.v;
-  S.beta = S.beta || 0;
-  const pw = Math.min(1.6, B.power / B.mass / 200);             // power to weight (Hellcat 1.3, Huracán 1.6, R34 0.8)
-  if (!S.drifting && v > 7) {
-    const powerOver = rwd && S.thr > 0.85 && Math.abs(steerIn) > 0.4 && S.gear <= 3 && pw > 0.7;
-    const tooFast = Math.abs(v * turnRate) > grip * G * 1.15;
-    if ((hb && Math.abs(steerIn) > 0.2) || powerOver || tooFast) {
-      S.drifting = true; S.driftDir = Math.sign(steerIn) || Math.sign(turnRate) || 1; S.driftT = 0; S.driftPts = 0;
-      S.beta = -S.driftDir * 0.12;
-      S.driftCombo = simTime - (S.driftEnd ?? -9) < 2.5 ? (S.driftCombo || 1) + 1 : 1;
-      popup(S.driftCombo > 1 ? `Drift x${S.driftCombo}` : 'Drift', '');
-    }
-  }
-  if (!S.drifting) {
-    S.beta *= Math.exp(-d * 8);
-    S.psi -= turnRate * d;
-    if (hb && v > 1) { S.v *= Math.exp(-d * 1.2); S.skid = Math.max(S.skid, 0.2); }      // handbrake in a straight line
-    return turnRate;
-  }
-  const dir = S.driftDir;
-  let b = -S.beta * dir;                                            // the drift angle (positive)
-  const counter = -steerIn * dir;                                   // > 0: steering against the slide
-  // (the handbrake swings the tail hardest at low speed: a flick at 150 km/h is a twitch, not a pirouette)
-  const push = (hb ? 1.5 / (1 + v / 25) : 0) + S.thr * pw * (rwd ? 1.5 : 0.7) + Math.max(0, -counter) * 0.8;
-  const pull = 1.1 + grip * 0.6 + Math.max(0, counter) * 2.2;
-  b += (push * (1 - Math.min(1, b / 1.3) * 0.5) - pull * b) * d;
-  if (b > 1.45) {
-    // too far round: it spins and the drift is lost
-    popup('Spun out', 'bad'); S.v *= 0.3; S.psi -= dir * 0.6; S.beta = 0; S.drifting = false; S.driftEnd = -9; S.driftPts = 0;
-    return 0;
-  }
-  b = Math.max(0, b);
-  S.beta = -dir * b;
-  // it still carves round the corner: the tyres turn its path, harder the further it hangs out
-  const lat = grip * G * (0.55 + 0.45 * Math.min(1, b / 0.5));
-  const courseRate = dir * Math.min(lat / Math.max(3, v), 1.6) * Math.min(1, b / 0.15) + turnRate * 0.25;
-  const chi = S.psi - S.beta - courseRate * d;
-  S.psi = chi + S.beta;
-  // sliding scrubs speed (the handbrake more), screeches and smokes, and lays two lines of rubber
-  S.v *= Math.exp(-d * (Math.sin(b) * 0.3 + (hb ? 0.35 : 0)));
-  S.skid = Math.max(S.skid, Math.min(0.45, 0.15 + b * 0.5));
-  const paved = S.surface === 'road' || S.surface === 'pave';
-  S.driftSmoke = (S.driftSmoke || 0) + d * b * (paved ? 45 : 15);
-  const fx = Math.sin(S.psi), fz = Math.cos(S.psi), rx = -fz, rz = fx, o = B.W / 2 - 0.13;
-  while (S.driftSmoke >= 1) { S.driftSmoke -= 1; const s = Math.random() < 0.5 ? 1 : -1; spawnSmoke(S.x + rx * o * s, S.y + 0.25, S.z + rz * o * s, -fx * 1.5 + rx * s, -fz * 1.5 + rz * s, paved ? 0.8 : 0.5); }
-  // points: how long and how far sideways, at speed
-  S.driftT += d; S.driftPts += d * v * b * 10;
-  if ((b < 0.06 && !hb && S.driftT > 0.3) || v < 4) endDrift();
-  return courseRate;
-}
-function endDrift() {
-  if (!S.drifting) return;
-  S.drifting = false; S.driftEnd = simTime;
-  const pts = Math.round(S.driftPts || 0), combo = S.driftCombo || 1;
-  if (pts >= 40) { const total = pts * combo; banked += total; popup(`Drift ${pts}${combo > 1 ? ` x${combo}` : ''} +${total.toLocaleString()}`, 'good'); }
-  S.driftPts = 0;
+  if (S.onRoad && S.burnSpin > 6 && S.burnMark > 0.25) { S.burnMark = 0; addSkid(S.x + (Math.random() - 0.5) * 0.05, S.z + (Math.random() - 0.5) * 0.05, S.psi + (Math.random() - 0.5) * 0.2, S.y); }
+  // tyre smoke pours off the back wheel and drifts up and back
+  S.burnSmoke += d * Math.min(1, S.burnSpin / 15) * (S.surface === 'road' || S.surface === 'pave' ? 30 : 10);
+  while (S.burnSmoke >= 1) { S.burnSmoke -= 1; spawnSmoke(S.x - fx * 0.25, S.y + 0.25, S.z - fz * 0.25, -fx * 2.5, -fz * 2.5, S.surface === 'road' || S.surface === 'pave' ? 0.8 : 0.5); }
 }
 function endBurnout() {
   const secs = S.burnT || 0, pts = Math.round(secs * 90);
@@ -491,20 +417,17 @@ function step(d) {
   if (S.burnSpin > 2) S.skid = Math.max(S.skid, Math.min(0.4, S.burnSpin / 60));
   if (burning) a = 0;          // (no wheelie from a burnout)
 
-  // Wheelie: pitch about the rear axle. Acceleration lifts (a·sinφ), gravity pulls down (g·cosφ). (Cars don't.)
-  if (B.car) { S.theta = 0; S.omega = 0; }
-  else {
-    const phi = PHI0 + S.lean * 0.2 + S.theta + 0.08 * Vv.stand + 0.05 * Vv.high;
-    let alpha = (B.ka * a * Math.sin(phi) - G * Math.cos(phi)) / (3.6 * B.inertia) - 2.4 * S.omega + S.wob * 0.6;
-    if (S.theta <= 0 && alpha < 0 && S.omega <= 0) { alpha = 0; S.omega = 0; }
-    S.omega += alpha * d;
-    S.theta += S.omega * d;
-    if (S.theta < 0) {
-      if (S.omega < -3 && W.active) sfx.thump(Math.min(1, -S.omega / 6));
-      S.theta = 0; S.omega = S.omega < -1.5 ? -S.omega * 0.12 : 0;
-    }
-    if (phi > LOOP) { crash('Looped out', 'loop'); return; }
+  // Wheelie: pitch about the rear axle. Acceleration lifts (a·sinφ), gravity pulls down (g·cosφ).
+  const phi = PHI0 + S.lean * 0.2 + S.theta + 0.08 * Vv.stand + 0.05 * Vv.high;
+  let alpha = (B.ka * a * Math.sin(phi) - G * Math.cos(phi)) / (3.6 * B.inertia) - 2.4 * S.omega + S.wob * 0.6;
+  if (S.theta <= 0 && alpha < 0 && S.omega <= 0) { alpha = 0; S.omega = 0; }
+  S.omega += alpha * d;
+  S.theta += S.omega * d;
+  if (S.theta < 0) {
+    if (S.omega < -3 && W.active) sfx.thump(Math.min(1, -S.omega / 6));
+    S.theta = 0; S.omega = S.omega < -1.5 ? -S.omega * 0.12 : 0;
   }
+  if (phi > LOOP) { crash('Looped out', 'loop'); return; }
 
   // Steering: bicycle model, limited by what the tyres can hold. Push past the limit for too long and it lowsides.
   const steerIn = handsOff ? 0 : clamp(S.steerMouse + (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0), -1, 1) * (T.knee.on ? 0.6 : 1);
@@ -512,51 +435,30 @@ function step(d) {
   // mid-corner (onto grass or sand at speed) to wash out the front.
   S.gripSm = S.gripSm === undefined ? grip : S.gripSm + (grip - S.gripSm) * Math.min(1, d * 1.5);
   const gripSteer = Math.atan(S.gripSm * G * 0.9 * B.L / Math.max(1, S.v * S.v));
-  // (a car's front wheels turn further at low speed, and hold on at speed)
-  const maxSteer = B.car ? Math.min(0.62 / (1 + S.v / 16), gripSteer * 1.05) : Math.min(0.55 / (1 + S.v / 9), gripSteer) * (S.theta > 0.12 ? 0.55 : 1);
+  const maxSteer = Math.min(0.55 / (1 + S.v / 9), gripSteer) * (S.theta > 0.12 ? 0.55 : 1);
   S.steer += (steerIn * maxSteer - S.steer) * Math.min(1, d * 4.5);
-  let yawRate = S.v * Math.tan(S.steer) / B.L;
-  if (B.car) yawRate = carDrift(B, d, steerIn, grip, yawRate);      // (turns the nose and the path apart in a drift)
-  else S.psi -= yawRate * d;
+  const yawRate = S.v * Math.tan(S.steer) / B.L;
+  S.psi -= yawRate * d;
   S.alat = S.v * yawRate;
   const over = Math.abs(S.alat) / Math.max(0.1, grip * G);
   if (over > 1.25 && S.v > 9) S.slideT += d; else S.slideT = Math.max(0, S.slideT - d * 2);
   if (over > 0.95 && S.v > 7) S.skid = Math.max(S.skid, (over - 0.95) * 1.2);
-  if (B.car) {
-    // a car doesn't lowside: past the grip it scrubs speed and screeches (and may break into a drift: carDrift)
-    if (over > 1 && !S.drifting) { S.v *= Math.exp(-d * 0.6 * (over - 1)); S.skid = Math.max(S.skid, Math.min(0.4, (over - 1) * 0.8 + 0.1)); }
-    S.slideT = 0;
-  } else if (S.slideT > 0.5) { crash('Lowsided', 'lowside'); return; }
+  if (S.slideT > 0.5) { crash('Lowsided', 'lowside'); return; }
   S.roll += (Math.atan(S.alat / G) - (S.roll || 0)) * Math.min(1, d * 5);
   const fx = Math.sin(S.psi), fz = Math.cos(S.psi);
-  // a drifting car travels along its path, not where its nose points
-  const mv = B.car ? S.psi - (S.beta || 0) : S.psi;
-  S.x += Math.sin(mv) * S.v * d; S.z += Math.cos(mv) * S.v * d;
+  S.x += fx * S.v * d; S.z += fz * S.v * d;
   const gy = S.onRoad ? roadY(RC[MAP.eCls[q.e]].rank) : (q.e >= 0 && q.d < q.hw + 2.6 && RC[MAP.eCls[q.e]].walk) ? CURB : 0;
   S.y += (gy - S.y) * Math.min(1, d * 18);
-  // skid marks (both back tyres on a car)
-  if (S.skid > 0.12 && S.onRoad) {
-    S.skidDist += S.v * d;
-    if (S.skidDist > 0.35) { S.skidDist = 0; if (B.car) { const o = B.W / 2 - 0.13; addSkid(S.x - fz * o, S.z + fx * o, S.psi, S.y); addSkid(S.x + fz * o, S.z - fx * o, S.psi, S.y); } else addSkid(S.x, S.z, S.psi, S.y); }
-  }
+  // skid marks
+  if (S.skid > 0.12 && S.onRoad) { S.skidDist += S.v * d; if (S.skidDist > 0.35) { S.skidDist = 0; addSkid(S.x, S.z, S.psi, S.y); } }
 
   // Buildings, poles, trees, signals: a slow bump just stops you; anything faster is a crash
   S.spawnGrace = Math.max(0, (S.spawnGrace || 0) - d);
-  let hit;
-  if (B.car) {
-    // the car's front corners and bumper, and its back corners (the rig origin is the rear axle)
-    const over_ = (B.len - B.L) / 2, hw = B.W / 2, rx = -fz, rz = fx;
-    const pts = [[B.L + over_, 0], [B.L + over_ - 0.1, hw - 0.1], [B.L + over_ - 0.1, -hw + 0.1], [B.L / 2, hw], [B.L / 2, -hw], [-over_ + 0.1, hw - 0.1], [-over_ + 0.1, -hw + 0.1]];
-    for (const [f, l] of pts) { hit = hitAt(S.x + fx * f + rx * l, S.z + fz * f + rz * l, 0.05); if (hit) break; }
-  } else hit = hitAt(S.x + fx * B.L, S.z + fz * B.L, 0.25) || hitAt(S.x, S.z, 0.2);
+  let hit = hitAt(S.x + fx * B.L, S.z + fz * B.L, 0.25) || hitAt(S.x, S.z, 0.2);
   if (hit && S.spawnGrace > 0 && hit !== 'Hit a wall') hit = null;   // just respawned: ride out of anything you landed on
   if (hit) {
-    // a car takes a knock up to ~40 km/h (it just stops with a crunch); a bike only at walking pace
-    if (S.v < (B.car ? 11 : 3.5)) {
-      S.x -= fx * (B.car ? 0.5 : 0.35); S.z -= fz * (B.car ? 0.5 : 0.35);
-      if (S.v > 1) { sfx.thump(B.car ? 0.8 : 0.4); if (B.car && S.v > 4) { sfx.metal(Math.min(0.8, S.v / 12)); S.shake = Math.max(S.shake, 0.15); } }
-      S.v = 0;
-    } else { crash(hit, /pole|light|sign|pillar|tree/i.test(hit) ? 'pole' : 'wall'); return; }
+    if (S.v < 3.5) { S.x -= fx * 0.35; S.z -= fz * 0.35; if (S.v > 1) sfx.thump(0.4); S.v = 0; }
+    else { crash(hit, /pole|light|sign|pillar|tree/i.test(hit) ? 'pole' : 'wall'); return; }
   }
 
   // Red lights: entering a signalised junction against the light, judged once per junction
@@ -579,20 +481,18 @@ function step(d) {
     if (!u.on) continue;
     const dx = S.x - u.x, dz = S.z - u.z;
     const c = Math.cos(u.yaw), s = Math.sin(u.yaw);
-    // (a car is as wide as itself: widen the other car's box by half our width)
-    const hx = (u.T.W || 1.9) / 2 + (B.car ? B.W / 2 : 0.3), hz = (u.T.L || 4.4) / 2 + 0.15;
-    // the bike is tested at its back wheel, its middle (the rider) and its front wheel; a car bumper to bumper
-    const over_ = B.car ? (B.len - B.L) / 2 : 0, samples = B.car ? [-over_, B.L * 0.25, B.L * 0.5, B.L * 0.75, B.L + over_] : [0, B.L * 0.5, B.L];
+    const hx = (u.T.W || 1.9) / 2 + 0.3, hz = (u.T.L || 4.4) / 2 + 0.15;
+    // the bike is tested at its back wheel, its middle (the rider) and its front wheel
     let lx = 0, lz = 0, inside = false;
-    for (const f of samples) {
-      const px = dx + fx * f, pz = dz + fz * f, ax = px * c - pz * s, az = px * s + pz * c;
+    for (const f of [0, 0.5, 1]) {
+      const px = dx + fx * B.L * f, pz = dz + fz * B.L * f, ax = px * c - pz * s, az = px * s + pz * c;
       if (Math.abs(ax) < hx && Math.abs(az) < hz) { lx = ax; lz = az; inside = true; break; }
     }
     if (inside) {
       const rel = Math.hypot(fx * S.v - Math.sin(u.yaw) * u.v, fz * S.v - Math.cos(u.yaw) * u.v);
       // a cop pacing you in a normal pursuit only shoves you; only a ramming cop (3+ stars) or a hard hit crashes you
       const gentleCop = u.kind !== 'car' && u.chasing && !(stars() >= 3 && u.tac === 'ram') && rel < 9;
-      if (rel < (B.car ? 9 : 3.5) || S.spawnGrace > 0 || gentleCop) {
+      if (rel < 3.5 || S.spawnGrace > 0 || gentleCop) {
         // a bump, not a crash: pushed out the shortest way (side, front or back) and stopped against it
         const penX = hx - Math.abs(lx), penZ = hz - Math.abs(lz);
         if (penX < penZ) { const sd = lx >= 0 ? 1 : -1; S.x += c * sd * (penX + 0.05); S.z += -s * sd * (penX + 0.05); }
@@ -666,7 +566,6 @@ function crash(reason, kind = 'wall', other = null, relSpeed) {
   const B = BIKES[bikeKey], v = relSpeed ?? S.v, fx = Math.sin(S.psi), fz = Math.cos(S.psi), rx = -fz, rz = fx;
   const sev = clamp(v / 18, 0.25, 1.5), side = Math.random() < 0.5 ? -1 : 1;
   S.crashed = true; S.crashT = 0; S.crashReason = reason; S.cpsi = S.psi;
-  S.drifting = false; S.beta = 0; S.driftPts = 0;
   const bvx = fx * S.v, bvz = fz * S.v;
   // bike body
   const cb = { x: S.x, y: S.y + B.R, z: S.z, vx: bvx, vy: 0, vz: bvz, rx: -S.theta, ry: S.psi, rz: S.roll, ax: 0, ay: 0, az: 0, contact: 0 };
@@ -688,16 +587,10 @@ function crash(reason, kind = 'wall', other = null, relSpeed) {
     Object.assign(cb, { vx: bvx * 0.5, vz: bvz * 0.5, vy: 0.5, ax: 1 });
     Object.assign(cr, { vx: bvx * 0.6, vz: bvz * 0.6, vy: 1.5, ax: 2 });
   }
-  if (B.car) {
-    // a car wrecks differently: it bounces back off the hit and spins, staying on its wheels; nobody is thrown
-    Object.assign(cb, { vx: (kind === 'car' ? bvx * 0.45 : -bvx * 0.2) + rx * side * sev, vz: (kind === 'car' ? bvz * 0.45 : -bvz * 0.2) + rz * side * sev, vy: 0.4 + sev * 0.4, ax: 0, ay: side * (1.5 + sev * 2.5), az: 0 });
-    Object.assign(cr, { x: cb.x, y: cb.y, z: cb.z, flail: 0 });
-  }
   S.cb = cb; S.cr = cr;
-  if (!B.car) detachRider(hip);
+  detachRider(hip);
   // debris and effects
-  const nose = B.car ? B.L + (B.len - B.L) / 2 : B.L * 0.7;
-  const at = [S.x + fx * nose, S.y + 0.6, S.z + fz * nose];
+  const at = [S.x + fx * B.L * 0.7, S.y + 0.6, S.z + fz * B.L * 0.7];
   if (kind !== 'water') spawnDebris(at, [bvx * 0.4, bvz * 0.4], Math.round(6 + sev * 16), [rig.paint, rig.accent, carMats.copBlack]);
   if (kind === 'car' && other) {
     spawnDebris([at[0], 1.0, at[2]], [bvx * 0.3, bvz * 0.3], Math.round(10 + sev * 14), [FX.glassMat], true);
@@ -770,19 +663,9 @@ function crashStep(d) {
   S.crashT += d;
   const cb = S.cb, cr = S.cr;
   cr.thudCd -= d;
-  const car = BIKES[bikeKey].car;
-  // bike (or car)
-  const rb = bodyPhysics(cb, d, car ? BIKES[bikeKey].R : 0.32, car ? 0.1 : 0.25, car ? 0.9 : 0.5, false);
+  // bike
+  const rb = bodyPhysics(cb, d, 0.32, 0.25, 0.5, false);
   cb.rx += cb.ax * d; cb.ry += cb.ay * d; cb.rz += cb.az * d;
-  if (car) {
-    // a car spins out on its wheels and skids to a stop, leaving rubber
-    cb.rx = 0; cb.rz = 0; cb.ay *= Math.exp(-d * 1.2);
-    if (rb.slide > 2 && Math.random() < d * 20) addSkid(cb.x, cb.z, cb.ry, 0);
-    S.skid = rb.slide > 2 ? Math.min(0.4, rb.slide * 0.04) : 0;
-    Object.assign(cr, { x: cb.x, y: cb.y, z: cb.z });
-    if (S.crashT > 3.4) { if (bails <= 0) gameOver(); else respawn(); }
-    return;
-  }
   if (cb.contact) {
     // lie down on a side and slide
     const sideT = Math.sign(wrapPi(cb.rz) || 1) * Math.PI / 2;
@@ -1238,14 +1121,6 @@ function placeRig(dt) {
   } else {
     r.position.set(S.x, S.y + B.R, S.z);
     const roll = clamp(S.roll || 0, -0.85, 0.85) * (S.theta > 0.12 ? 0.6 : 1);
-    if (rig.car) {
-      // a car leans out of a corner a little, squats under power and dives under braking
-      r.rotation.set(0, S.psi, 0);
-      rig.body.position.y = 0; rig.body.rotation.z = -clamp(S.roll || 0, -0.8, 0.8) * 0.06; rig.body.rotation.x = clamp(S.susp * 0.5, -0.05, 0.05);
-      const spin = S.crashed ? 0 : S.v * dt;
-      rig.wheels[0].rotation.x += (spin + (S.burnSpin || 0) * dt) / B.R; rig.wheels[1].rotation.x += spin / (B.Rf || B.R);
-      return;
-    }
     r.rotation.set(-S.theta, S.psi, roll);
     rig.body.position.y = S.theta > 0.05 ? 0 : -Math.abs(S.susp) * 0.3;
     rig.body.rotation.x = S.theta > 0.05 ? 0 : clamp(S.susp, -0.04, 0.04);
@@ -1274,8 +1149,7 @@ function drawDash() {
   rig.dashTex.needsUpdate = true;
 }
 function updateCamera(dt) {
-  // (a drifting car: the camera follows mostly where it's going, so you see it slide sideways)
-  const B = BIKES[bikeKey], hd = B.car ? S.psi - (S.beta || 0) * 0.75 : S.psi, fx = Math.sin(hd), fz = Math.cos(hd), rx = -fz, rz = fx;
+  const B = BIKES[bikeKey], fx = Math.sin(S.psi), fz = Math.cos(S.psi), rx = -fz, rz = fx;
   const inPlay = state === 'play' || state === 'pause' || state === 'over';
   const firstish = inPlay && (pov === 'first' || pov === 'chest');
   rig.head.visible = !(inPlay && pov === 'first' && !(S.crashed && reduceMotion));
@@ -1286,8 +1160,7 @@ function updateCamera(dt) {
   } else if (state === 'menu') {
     menuT += dt * 0.25;
     const a = S.psi + Math.PI * 0.75 + Math.sin(menuT) * 0.7;
-    const orbit = B.car ? 6.8 : 4.4;
-    tmp.set(S.x + Math.sin(a) * orbit + fx * (B.car ? B.L / 2 : 0), B.car ? 1.9 : 1.6, S.z + 0.6 + Math.cos(a) * orbit + fz * (B.car ? B.L / 2 : 0));
+    tmp.set(S.x + Math.sin(a) * 4.4, 1.6, S.z + 0.6 + Math.cos(a) * 4.4);
     camPos.lerp(tmp, Math.min(1, dt * 2));
     lookAt.lerp(tmp2.set(S.x + fx * 0.6, 0.8, S.z + fz * 0.6), Math.min(1, dt * 4));
     camera.position.copy(camPos); camera.up.set(0, 1, 0); camera.lookAt(lookAt);
@@ -1335,7 +1208,6 @@ function updateCamera(dt) {
   } else {
     let back = 5.4, high = 2.1, look = 6, lat = 0;
     if (pov === 'far') { back = 11; high = 4.2; look = 10; }
-    if (B.car && pov !== 'drone') { back += B.L * 0.35; high += 0.35; lat *= 1.3; }      // (a car is bigger: sit a little further back)
     if (pov === 'side') { back = 1.2; high = 1.25; lat = 4.6; look = 1.5; }
     if (pov === 'drone') { back = 9; high = 24; look = 8; }
     tmp.set(S.x - fx * back + rx * lat, S.y + high + S.theta * 0.5, S.z - fz * back + rz * lat);

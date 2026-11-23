@@ -172,44 +172,8 @@ const BIKES = {
            power: 88000, mass: 194, vmax: 72, traction: 10.0, ka: 2.35, inertia: 1.9, grip: 1.18,
            R: 0.31, Rf: 0.3, L: 1.38, seat: 0.82, knobby: false, color: '#c8102e', accent: '#f2f2f2', frame: '#1f3fa8', style: 'sport',
            engine: { idle: 1300, redline: 15000, gears: 6, curve: 'four', pipe: 62, muffle: 2800, cyl: 4 } },
-  // Cars (car: true): drive them round the city. R wheel radius, L wheelbase, W width, len length; shape = body profile
-  // (vehicles.js CAR_TYPES). Power, weight and top speed are the real cars' (approximately).
-  corvette: { car: true, brand: 'Chevrolet', name: 'Corvette C8', type: 'gas', stroke: 4, label: 'V8', blurb: 'Mid-engine V8 Stingray. Low, wide and quick off the line.',
-           power: 369000, mass: 1530, vmax: 82, traction: 7.6, ka: 0, inertia: 9, grip: 1.12, R: 0.35, Rf: 0.34, L: 2.72, W: 1.93, len: 4.63, seat: 0, shape: 'vette',
-           color: '#c8102e', accent: '#14151a', frame: '#14151a', style: 'car', engine: { idle: 800, redline: 6500, gears: 8, curve: 'four', pipe: 52, muffle: 850, cyl: 8 } },
-  camaro: { car: true, brand: 'Chevrolet', name: 'Camaro SS', type: 'gas', stroke: 4, label: 'V8', blurb: 'Big V8 muscle. Rear-drive, loves a burnout.',
-           power: 339000, mass: 1700, vmax: 73, traction: 6.6, ka: 0, inertia: 9, grip: 1.0, R: 0.36, Rf: 0.36, L: 2.81, W: 1.9, len: 4.78, seat: 0, shape: 'camaro',
-           color: '#f2c230', accent: '#14151a', frame: '#14151a', style: 'car', engine: { idle: 750, redline: 6500, gears: 6, curve: 'four', pipe: 46, muffle: 780, cyl: 8 } },
-  mustang: { car: true, brand: 'Ford', name: 'Mustang GT', type: 'gas', stroke: 4, label: 'V8', blurb: 'The pony car. 5.0 Coyote V8, fastback, rear-drive.',
-           power: 358000, mass: 1750, vmax: 70, traction: 6.7, ka: 0, inertia: 9, grip: 1.0, R: 0.36, Rf: 0.36, L: 2.72, W: 1.92, len: 4.79, seat: 0, shape: 'mustang',
-           color: '#1f3fa8', accent: '#f2f2f2', frame: '#14151a', style: 'car', engine: { idle: 750, redline: 7500, gears: 6, curve: 'four', pipe: 50, muffle: 820, cyl: 8 } },
-  hellcat: { car: true, brand: 'Dodge', name: 'Challenger Hellcat', type: 'gas', stroke: 4, label: 'Supercharged V8', blurb: '717 hp of supercharged Hemi. Heavy, loud, all tyre smoke.',
-           power: 535000, mass: 2000, vmax: 88, traction: 6.4, ka: 0, inertia: 9, grip: 0.98, R: 0.37, Rf: 0.37, L: 2.95, W: 1.92, len: 5.02, seat: 0, shape: 'hellcat',
-           color: '#2b2e33', accent: '#c8102e', frame: '#14151a', style: 'car', engine: { idle: 700, redline: 6200, gears: 8, curve: 'four', pipe: 42, muffle: 700, cyl: 8 } },
-  r34: { car: true, awd: true, brand: 'Nissan', name: 'Skyline GT-R R34', type: 'gas', stroke: 4, label: 'Twin-turbo I6', blurb: 'The JDM legend. RB26 straight six, all-wheel drive, big wing.',
-           power: 246000, mass: 1560, vmax: 70, traction: 8.4, ka: 0, inertia: 9, grip: 1.08, R: 0.33, Rf: 0.33, L: 2.67, W: 1.79, len: 4.6, seat: 0, shape: 'r34',
-           color: '#2a55c8', accent: '#14151a', frame: '#14151a', style: 'car', engine: { idle: 900, redline: 8000, gears: 6, curve: 'four', pipe: 78, muffle: 1500, cyl: 6 } },
-  supra: { car: true, brand: 'Toyota', name: 'Supra MK4', type: 'gas', stroke: 4, label: 'Twin-turbo I6', blurb: '2JZ straight six. Smooth, tough, built for big power.',
-           power: 239000, mass: 1570, vmax: 70, traction: 6.9, ka: 0, inertia: 9, grip: 1.04, R: 0.33, Rf: 0.33, L: 2.55, W: 1.81, len: 4.52, seat: 0, shape: 'supra',
-           color: '#ff6a00', accent: '#14151a', frame: '#14151a', style: 'car', engine: { idle: 850, redline: 7000, gears: 6, curve: 'four', pipe: 74, muffle: 1450, cyl: 6 } },
-  huracan: { car: true, awd: true, brand: 'Lamborghini', name: 'Huracán', type: 'gas', stroke: 4, label: 'V10', blurb: 'Naturally aspirated V10 screaming to 8,500 rpm. All-wheel drive wedge.',
-           power: 470000, mass: 1420, vmax: 90, traction: 9.8, ka: 0, inertia: 9, grip: 1.18, R: 0.35, Rf: 0.34, L: 2.62, W: 1.96, len: 4.52, seat: 0, shape: 'lambo',
-           color: '#7dc21f', accent: '#14151a', frame: '#14151a', style: 'car', engine: { idle: 1000, redline: 8500, gears: 7, curve: 'four', pipe: 90, muffle: 2300, cyl: 10 } },
-  aventador: { car: true, awd: true, brand: 'Lamborghini', name: 'Aventador SVJ', type: 'gas', stroke: 4, label: 'V12', blurb: '770 hp V12 flagship. Scissor-door supercar, absurdly fast.',
-           power: 566000, mass: 1525, vmax: 97, traction: 10, ka: 0, inertia: 9, grip: 1.2, R: 0.36, Rf: 0.35, L: 2.7, W: 2.1, len: 4.94, seat: 0, shape: 'lambo',
-           color: '#ff8a00', accent: '#14151a', frame: '#14151a', style: 'car', engine: { idle: 1000, redline: 8700, gears: 7, curve: 'four', pipe: 96, muffle: 2600, cyl: 12 } },
-  turbo911: { car: true, awd: true, brand: 'Porsche', name: '911 Turbo S', type: 'gas', stroke: 4, label: 'Twin-turbo flat-6', blurb: 'Rear-engine, all-wheel drive. 0-100 in under 3 seconds.',
-           power: 477000, mass: 1640, vmax: 92, traction: 10.4, ka: 0, inertia: 9, grip: 1.16, R: 0.35, Rf: 0.34, L: 2.45, W: 1.9, len: 4.54, seat: 0, shape: 'p911',
-           color: '#c9ccd0', accent: '#14151a', frame: '#14151a', style: 'car', engine: { idle: 900, redline: 7200, gears: 8, curve: 'four', pipe: 70, muffle: 1700, cyl: 6 } },
 };
 for (const b of Object.values(BIKES)) {
-  if (b.car) {
-    b.drag = b.power / b.mass / (b.vmax ** 3);
-    const e = b.engine, wheelRpmTop = b.vmax / (TAU * b.R) * 60, top = e.redline / wheelRpmTop;
-    e.ratios = Array.from({ length: e.gears }, (_, g) => top * (3.4 ** ((e.gears - 1 - g) / (e.gears - 1))));
-    b.bars = { power: clamp(Math.log(b.power / 180000) / Math.log(3.4), 0.08, 1), speed: clamp((b.vmax - 60) / 38, 0.08, 1), weight: clamp((b.mass - 1300) / 800, 0.05, 1), ease: clamp((b.grip - 0.9) / 0.32 * 0.6 + (b.traction - 6) / 5 * 0.4, 0.1, 1) };
-    continue;
-  }
   const m = b.mass + 75; b.drag = b.power / m / (b.vmax ** 3);
   if (b.engine) {
     // Overall ratios: top gear hits the redline at top speed, first gear ~2.7x taller
@@ -436,6 +400,29 @@ function blob(parent, p, r, mat, sx = 1, sy = 1, sz = 1) {
 }
 function cube(parent, p, w, h, d, mat, rx = 0) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  m.position.copy(p); m.rotation.x = rx; parent.add(m); return m;
+}
+// A box with rounded edges and corners (moulded plastic, a padded seat, a cast frame), cached by size.
+// The box's corners are pushed out onto spheres of radius r, with the normals of the rounded surface.
+const rboxCache = new Map();
+function roundedBox(w, h, d, r) {
+  r = Math.min(r, w / 2 - 0.001, h / 2 - 0.001, d / 2 - 0.001);
+  const key = `${w.toFixed(3)},${h.toFixed(3)},${d.toFixed(3)},${r.toFixed(3)}`;
+  if (rboxCache.has(key)) return rboxCache.get(key);
+  const S = 4, g = new THREE.BoxGeometry(w, h, d, S, S, S), p = g.attributes.position, n = g.attributes.normal;
+  const ix = w / 2 - r, iy = h / 2 - r, iz = d / 2 - r, v = new THREE.Vector3(), c = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    c.set(clamp(v.x, -ix, ix), clamp(v.y, -iy, iy), clamp(v.z, -iz, iz));
+    const off = v.clone().sub(c);
+    if (off.lengthSq() < 1e-12) continue;
+    off.normalize(); p.setXYZ(i, c.x + off.x * r, c.y + off.y * r, c.z + off.z * r); n.setXYZ(i, off.x, off.y, off.z);
+  }
+  rboxCache.set(key, g);
+  return g;
+}
+function rcube(parent, p, w, h, d, mat, rx = 0) {
+  const m = new THREE.Mesh(roundedBox(w, h, d, Math.min(w, h, d) * 0.35), mat);
   m.position.copy(p); m.rotation.x = rx; parent.add(m); return m;
 }
 function axle(parent, p, r, len, mat, n = 16) {

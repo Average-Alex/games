@@ -431,7 +431,7 @@ function setupMapMaterials() {
   MM.dome = new THREE.MeshLambertMaterial({ color: '#eceae4', side: THREE.DoubleSide });
   MM.glass = new THREE.MeshLambertMaterial({ color: '#a8c8d8', transparent: true, opacity: 0.35, side: THREE.DoubleSide });
   MM.busSign = new THREE.MeshLambertMaterial({ color: '#1f5fbf' });
-  MM.parkedPaint = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.35, metalness: 0.4 });
+  MM.parkedPaint = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.35, metalness: 0.4, vertexColors: true });
   MM.track = new THREE.MeshLambertMaterial({ vertexColors: true });
   MM.tunnel = new THREE.MeshLambertMaterial({ color: '#3b3d41', side: THREE.DoubleSide, emissive: '#101113' });
   MM.tunnelLamp = new THREE.MeshBasicMaterial({ color: '#fff1c8', side: THREE.DoubleSide });
@@ -569,7 +569,9 @@ const STOP_GEO = {
 // ---------------------------------------------------------------- streamed tiles
 const tiles = new Map();
 const liveSignals = new Set();
-function tileRadius() { return Math.max(quality === 'low' || quality === 'med' ? 1 : 2, (quality === 'low' || quality === 'med' ? 2 : 3) - GOV.dropRadius); }
+// Streamed street tiles round you: 5 x 5 on Low/Medium/High (the far skyline shows the city beyond), 7 x 7 on Ultra.
+// Laptop graphics are held back by the number of things drawn, so this matters more than resolution.
+function tileRadius() { return Math.max(1, (quality === 'ultra' ? 3 : 2) - GOV.dropRadius); }
 function disposeTile(t) {
   for (const part of ['base', 'detail']) if (t[part]) disposePart(t, part);
   tiles.delete(t.key);
@@ -591,6 +593,9 @@ function updateTiles(cx, cz, force) {
     const di = Math.abs(t.i - ti), dj = Math.abs(t.j - tj);
     if (di > RB + 1 || dj > RB + 1) disposeTile(t);
     else if (t.detail && (di > RD + 1 || dj > RD + 1)) disposePart(t, 'detail');
+    // the ring just outside stays built (so turning round doesn't rebuild it) but isn't drawn
+    if (t.base) t.base.g.visible = di <= RB && dj <= RB;
+    if (t.detail) t.detail.g.visible = di <= RD && dj <= RD;
   }
   for (const t of tiles.values()) if (t.base && t.base.near) t.base.near.visible = Math.abs(t.i - ti) <= 1 && Math.abs(t.j - tj) <= 1;
   const todo = [];
@@ -1037,10 +1042,67 @@ function buildBase(t) {
     const sp = new THREE.Sprite(mat); sp.scale.set(22, 5.5, 1); sp.position.set(l.x, l.y, l.z); sp.renderOrder = 4; g.add(sp); disp.push(tex, mat);
   }
 
+  near.userData.mergeRoot = true;
+  mergeStatic(g, disp);
   scene.add(g);
   t.base = { g, disp, signs: signKeys, near };
   const allObs = obs.concat(lineObs);
   t.baseObs = allObs; t.obs = t.detail ? t.obs.concat(allObs) : allObs.slice();
+}
+// Merge a tile's static meshes that share a material into one draw each. Laptop GPUs (and Chromebooks) are held back
+// by the number of draws far more than by triangles: a tile was ~30 separate poles, signs, posts, shelters and kerbs.
+// Skipped: instanced meshes, sprites, anything under an object with userData.keep (signal heads, whose lamps change),
+// and meshes with their own material (shop and street-name signs). A child group with userData.mergeRoot (the near
+// signs, shown and hidden as a group) is merged on its own.
+function mergeStatic(root, disp) {
+  root.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(root.matrixWorld).invert(), m4 = new THREE.Matrix4();
+  const buckets = new Map();
+  const visit = (o) => {
+    for (const c of [...o.children]) {
+      if (c.userData.keep) continue;
+      if (c.userData.mergeRoot) { mergeStatic(c, disp); continue; }
+      if (c.isMesh && !c.isInstancedMesh && !Array.isArray(c.material) && c.geometry && c.geometry.attributes.position) {
+        const a = c.geometry.attributes, sig = Object.keys(a).sort().join(',');
+        const key = c.material.uuid + '|' + sig + '|' + c.castShadow + '|' + (c.customDepthMaterial ? c.customDepthMaterial.uuid : '');
+        let b = buckets.get(key); if (!b) buckets.set(key, b = []);
+        b.push(c);
+      }
+      if (c.children.length) visit(c);
+    }
+  };
+  visit(root);
+  for (const list of buckets.values()) {
+    if (list.length < 2) continue;
+    const names = Object.keys(list[0].geometry.attributes);
+    const arrays = Object.fromEntries(names.map((n) => [n, []]));
+    for (const me of list) {
+      m4.multiplyMatrices(inv, me.matrixWorld);
+      const g = me.geometry.index ? me.geometry.toNonIndexed() : me.geometry.clone();
+      g.applyMatrix4(m4);
+      for (const n of names) { const at = g.attributes[n]; arrays[n].push(at); }
+      me.parent.remove(me);
+      if (g !== me.geometry) arrays._tmp = (arrays._tmp || []).concat([g]);
+    }
+    const out = new THREE.BufferGeometry();
+    for (const n of names) {
+      const parts = arrays[n], size = parts[0].itemSize, total = parts.reduce((s, p) => s + p.count, 0);
+      const arr = new Float32Array(total * size); let o = 0;
+      for (const p of parts) {
+        // (integer attributes flagged normalised are scaled to 0..1, since the merged one is float)
+        const sc = p.normalized ? (p.array instanceof Uint8Array ? 1 / 255 : p.array instanceof Uint16Array ? 1 / 65535 : 1) : 1;
+        for (let i = 0; i < p.count; i++) for (let k = 0; k < size; k++) arr[(o + i) * size + k] = p.array[i * size + k] * sc;
+        o += p.count;
+      }
+      out.setAttribute(n, new THREE.BufferAttribute(arr, size, false));
+    }
+    for (const g of arrays._tmp || []) g.dispose();
+    out.computeBoundingSphere();
+    const merged = new THREE.Mesh(out, list[0].material);
+    merged.castShadow = list[0].castShadow; merged.receiveShadow = list[0].receiveShadow;
+    if (list[0].customDepthMaterial) merged.customDepthMaterial = list[0].customDepthMaterial;
+    root.add(merged); disp.push(out);
+  }
 }
 function dirFromNode(n, adjEntry) {
   const m = MAP, e = adjEntry >> 1, rev = adjEntry & 1, o0 = m.eOff[e], o1 = m.eOff[e + 1] - 1;
@@ -1219,6 +1281,7 @@ function buildDetail(t) {
       const armLen = Math.min(hw * 0.9, 7), arm = new THREE.Mesh(new THREE.BoxGeometry(armLen, 0.12, 0.12), MM.pole); disp.push(arm.geometry);
       arm.position.set(px - rx * armLen / 2, 6.0, pz - rz * armLen / 2); arm.rotation.y = Math.atan2(rz, -rx); g.add(arm);
       const head = new THREE.Group(); head.position.set(px - rx * armLen * 0.85, 5.3, pz - rz * armLen * 0.85); head.rotation.y = Math.atan2(dx, dz); g.add(head);
+      head.userData.keep = true;           // (its lamps change colour: never merged away)
       head.add(new THREE.Mesh(sigHeadG, MM.sigBox));
       const lampsM = [0.4, 0, -0.4].map((y) => { const l = new THREE.Mesh(sigLampG, MM.sigOff); l.position.set(0, y, 0.17); head.add(l); return l; });
       const sig = { n, grp, lamps: lampsM, x: px, z: pz };
@@ -1300,16 +1363,18 @@ function buildDetail(t) {
   for (const type of PT) {
     const list = parked[type]; if (!list.length) continue;
     const G_ = carGeo(type), q = new THREE.Quaternion(), m4 = new THREE.Matrix4(), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3(), col = new THREE.Color();
-    const body = new THREE.InstancedMesh(G_.body, MM.parkedPaint, list.length), glass = new THREE.InstancedMesh(G_.glass, carMats.glass, list.length), roofI = new THREE.InstancedMesh(G_.roof, MM.parkedPaint, list.length), wh = new THREE.InstancedMesh(G_.wheels, carMats.tire, list.length);
+    // (the painted shell carries its glass and trim as vertex colours: two draws per car type)
+    const body = new THREE.InstancedMesh(G_.shell, MM.parkedPaint, list.length), wh = new THREE.InstancedMesh(G_.wheels, carMats.wheel, list.length);
     list.forEach(([x, z, a, ci], k) => {
       q.setFromAxisAngle(Yv, a); m4.compose(p.set(x, roadY(3), z), q, one);
-      for (const im of [body, glass, roofI, wh]) im.setMatrixAt(k, m4);
-      col.set(C.cars[ci]); body.setColorAt(k, col); roofI.setColorAt(k, col);
+      body.setMatrixAt(k, m4); wh.setMatrixAt(k, m4);
+      col.set(C.cars[ci]); body.setColorAt(k, col);
     });
     body.castShadow = true;
-    g.add(body, glass, roofI, wh); disp.push(body, glass, roofI, wh);
+    g.add(body, wh); disp.push(body, wh);
   }
 
+  mergeStatic(g, disp);
   scene.add(g);
   t.detail = { g, disp, signs: signNames, signals };
   t.obs = (t.baseObs || []).concat(obs);
