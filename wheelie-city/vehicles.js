@@ -337,7 +337,7 @@ function activate(u, near) {
   }
   return false;
 }
-function deactivate(u) { u.on = false; u.g.visible = false; u.chasing = false; }
+function deactivate(u) { if (u.player) return; u.on = false; u.g.visible = false; u.chasing = false; u.parked = false; }
 
 // Free driving (cops closing in): steer straight at you, but never through buildings
 function driveFree(u, d, targetV) {

@@ -218,18 +218,11 @@ function twoBoneIK(a, b, c, target, pole) {
 }
 function attachRiderModel(r) {
   if (!r || r.model || !PEOPLE.ready || !r.mk) return;
-  const root = THREE.SkeletonUtils.clone(PEOPLE.male.scene);
-  let body = null; const extras = [];
-  root.traverse((o) => { if (o.isSkinnedMesh) { if (o.name === PEOPLE.male.bodyName) body = o; else extras.push(o); } });
-  const skin = new THREE.Color('#ffffff').lerp(new THREE.Color(riderLook.skin), 0.55).getHexString();
-  body.material = skinMat('male', 'light', '#' + skin);
-  for (const o of extras) o.visible = false;              // brows and eyes are inside the helmet
-  const G = PEOPLE.garments.male, parent = body.parent;
-  const bindTo = (geo, mat) => { const m = new THREE.SkinnedMesh(geo, mat); m.bind(body.skeleton, body.bindMatrix); m.position.copy(body.position); m.quaternion.copy(body.quaternion); m.scale.copy(body.scale); parent.add(m); return m; };
-  bindTo(G.longTop, clothMat(riderLook.jersey, 'jersey', 0.85));
-  bindTo(G.trousers, clothMat(riderLook.pants, 'denim', 0.85));
-  bindTo(G.shoes, clothMat('#e8e8e4', 'leather', 0.5));       // MX boots
-  root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
+  // dressed from the wardrobe (wardrobe.js), hair under the helmet
+  const look = typeof LOOK !== 'undefined' ? Object.assign({}, LOOK, { hair: 'none', beard: false }) : { sex: 'male', tone: 1, hair: 'none', top: 'long', topCol: riderLook.jersey, legs: 'trousers', legsCol: riderLook.pants, shoes: '#e8e8e4', hairCol: '#222' };
+  const fig = makeFigure(look); if (!fig) return;
+  const root = fig.root;
+  root.traverse((o) => { if (o.isSkinnedMesh && /eye|brow/i.test(o.name + (o.material && o.material.name))) o.visible = false; });
   const bone = (n) => root.getObjectByName(n);
   const B = { pelvis: bone('pelvis'), spine: bone('spine_01'), neck: bone('neck_01'), head: bone('Head'),
     ua: [bone('upperarm_l'), bone('upperarm_r')], la: [bone('lowerarm_l'), bone('lowerarm_r')], hand: [bone('hand_l'), bone('hand_r')],

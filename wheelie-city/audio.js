@@ -260,6 +260,14 @@ const sfx = (() => {
     init, update, setBike,
     thump(s) { if (!can()) return; tone('sine', 90, 45, 0.35 + 0.5 * s, 0.004, 0.2); noiseHit('lowpass', 300, 0.7, 0.2 * s, 0.002, 0.08); },
     pop() { if (!can()) return; tone('sine', 160, 90, 0.18, 0.003, 0.09); },
+    // on foot: a pistol shot (crack, body and a short tail off the buildings), a swing through the air, the till
+    gun() {
+      if (!can()) return;
+      noiseHit('highpass', 2500, 0.7, 0.9, 0.001, 0.05); noiseHit('lowpass', 1400, 0.8, 1.0, 0.001, 0.22);
+      tone('sine', 140, 45, 0.7, 0.001, 0.16); noiseHit('bandpass', 700, 1.2, 0.18, 0.02, 0.6);
+    },
+    swing() { if (!can()) return; const f = noiseHit('bandpass', 900, 1.6, 0.16, 0.03, 0.11); f.frequency.exponentialRampToValueAtTime(2400, ctx.currentTime + 0.12); },
+    cash() { if (!can()) return; const t = ctx.currentTime; tone('triangle', 1320, null, 0.12, 0.002, 0.12, null, t); tone('triangle', 1760, null, 0.12, 0.002, 0.25, null, t + 0.09); },
     shift() { if (!can()) return; noiseHit('bandpass', 900, 3, 0.05, 0.002, 0.03); },
     bodyHit(s) { if (!can()) return; tone('sine', 110, 38, 0.5 * s + 0.15, 0.003, 0.28); noiseHit('lowpass', 420, 0.8, 0.45 * s, 0.002, 0.14); },
     metal(s) {

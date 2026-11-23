@@ -81,7 +81,7 @@ function spawnPed(p) {
     const idle = Math.random() < 0.22;
     Object.assign(p, { on: true, e: q.e, s: q.s, dir: Math.random() < 0.5 ? 1 : -1, side: Math.random() < 0.5 ? 1 : -1, v: 0.95 + Math.random() * 0.75, knock: null, dodge: 0,
       idle: idle ? 6 + Math.random() * 18 : 0, pose: idle ? pick(Math.random, IDLE_POSES) : 'stand', watch: null, busy: Math.random() < 0.25 ? 'phone' : '',
-      dance: idle && Math.random() < (C.night ? 0.12 : 0.03) });
+      dance: idle && Math.random() < (C.night ? 0.12 : 0.03), hp: 100, dead: false, flee: null, robbed: false, stagger: 0 });
     p.off = R.path ? (Math.random() - 0.5) * 1.2 : MAP.eHW[q.e] + 1.0 + Math.random() * 1.0;
     pedPlace(p);
     if (buildingAt(p.x, p.z, 0.3) >= 0 || hitAt(p.x, p.z, 0.3)) continue;
@@ -103,8 +103,16 @@ function updatePeds(d) {
     if (!p.on) continue;
     active++;
     const dist = Math.hypot(p.x - bx, p.z - bz);
-    if (dist > 180 && !p.knock) { p.on = false; p.g.visible = false; continue; }
+    if (dist > 180 && !p.knock) { p.on = false; p.g.visible = false; p.dead = false; p.flee = null; continue; }
     p.hitCd -= d;
+    if (p.dead) {
+      // down for good: lies there a while, then is gone
+      p.deadT += d;
+      if (p.model) { p.animT = (p.animT || 0) + d; if (p.animT > 0.05) { p.model.mixer.update(p.animT); p.animT = 0; } }
+      if (p.deadT > 30 || dist > 120) { p.on = false; p.g.visible = false; p.dead = false; }
+      continue;
+    }
+    if (p.flee && !p.knock) { fleeStep(p, d, dist); continue; }
     if (p.knock) {
       // knocked flying: tumble, land, lie there a moment, get up angry
       const k = p.knock;
@@ -223,5 +231,60 @@ function pedsReact(x, z) {
   }
 }
 const PED_DODGE = ['Whoa!', 'Hey!', 'Watch it!', 'Sidewalk, buddy!', 'Seriously?!', 'Slow down!'];
+const PED_HURT = ['Ow!!', 'What the—', 'Help!', 'Stop!', 'Somebody help!'];
+const PED_SCREAM = ['RUN!', 'Call 911!', 'Oh my god!', 'Get down!', 'Help!!', 'He\'s got a gun!'];
+// ---- fights: people get hurt, go down, and everyone nearby runs
+function hurtPed(p, dmg, fromX, fromZ, how) {
+  if (!p.on || p.dead) return;
+  p.hp = (p.hp ?? 100) - dmg;
+  { const ax = p.x - fromX, az = p.z - fromZ, L = Math.hypot(ax, az) || 1; spawnBlood(p.x, (p.g.position.y || 0) + 1.2, p.z, ax / L, az / L, how === 'fists' ? 4 : 14); }
+  if (p.hp <= 0) { killPed(p, fromX, fromZ); return; }
+  if (p.model) { p.model.cur = null; personPlay(p.model, how === 'shot' ? 'Hit_Chest' : 'Hit_Head', 0.06); }
+  say(p, pick(Math.random, PED_HURT), false);
+  p.stagger = 0.7; startFlee(p, fromX, fromZ, 10);
+}
+function killPed(p, fromX, fromZ) {
+  p.dead = true; p.deadT = 0; p.flee = null; p.knock = null; p.idle = 0; p.watch = null;
+  // knocked back a little, away from the hit
+  const ax = p.x - fromX, az = p.z - fromZ, L = Math.hypot(ax, az) || 1;
+  p.x += ax / L * 0.4; p.z += az / L * 0.4; p.yaw = Math.atan2(-ax, -az);
+  p.g.position.set(p.x, p.off > 1.5 ? CURB : 0.03, p.z); p.g.rotation.y = p.yaw;
+  if (p.model) { p.model.cur = null; personPlay(p.model, 'Death01', 0.06); }
+  else p.body.rotation.x = -Math.PI / 2;
+  setTimeout(() => bloodPool(p.x - Math.sin(p.yaw) * 0.7, p.g.position.y, p.z - Math.cos(p.yaw) * 0.7), 900);
+  addHeat(1.4);                       // somebody always calls it in
+  panic(p.x, p.z, 35);
+}
+function startFlee(p, fromX, fromZ, t) { if (!p.on || p.dead) return; p.flee = { fx: fromX, fz: fromZ, t }; p.idle = 0; p.watch = null; }
+function panic(x, z, r) {
+  for (const q of peds) {
+    if (!q.on || q.dead || q.flee || Math.hypot(q.x - x, q.z - z) > r) continue;
+    startFlee(q, x, z, 7 + Math.random() * 7);
+    if (Math.random() < 0.25) say(q, pick(Math.random, PED_SCREAM), false);
+  }
+}
+// running away from trouble, round the buildings in the way
+function fleeStep(p, d, dist) {
+  const f = p.flee; f.t -= d; p.stagger = Math.max(0, (p.stagger || 0) - d);
+  let ax = p.x - f.fx, az = p.z - f.fz; const L = Math.hypot(ax, az) || 1; ax /= L; az /= L;
+  let yaw = Math.atan2(ax, az);
+  const sp = p.stagger > 0 ? 0.6 : 5.4;
+  for (let k = 0; k < 7; k++) {
+    if (buildingAt(p.x + Math.sin(yaw) * 1.5, p.z + Math.cos(yaw) * 1.5, 0.3) < 0) break;
+    yaw += (k % 2 ? 1 : -1) * 0.5 * (k + 1);
+  }
+  const nx = p.x + Math.sin(yaw) * sp * d, nz = p.z + Math.cos(yaw) * sp * d;
+  if (buildingAt(nx, nz, 0.25) < 0) { p.x = nx; p.z = nz; }
+  p.yaw = yaw;
+  const q = roadQuery(p.x, p.z, 10, pedEdge), onWalk = q.e >= 0 && q.d > q.hw && q.d < q.hw + 2.8;
+  p.g.position.set(p.x, onWalk ? CURB : 0.03, p.z);
+  p.g.rotation.y += wrapPi(p.yaw - p.g.rotation.y) * Math.min(1, d * 10);
+  if (p.model) {
+    if (p.stagger <= 0) personPlay(p.model, 'Sprint_Loop', 0.2, 0.85);
+    p.animT = (p.animT || 0) + d;
+    if (dist < 70 || p.animT > 0.1) { p.model.mixer.update(p.animT); p.animT = 0; }
+  } else { p.phase += 9 * d; const sw = Math.sin(p.phase); p.legL.rotation.set(sw * 0.9, 0, 0); p.legR.rotation.set(-sw * 0.9, 0, 0); p.armL.rotation.set(-sw, 0, 0); p.armR.rotation.set(sw, 0, 0); }
+  if (f.t <= 0) { p.flee = null; p.robbed = false; snapPed(p); }
+}
 const PED_CURSES = ['My LEG!!', 'Are you insane?!', 'I\'m calling the cops!', 'You hit me!!', 'Get back here!'];
 

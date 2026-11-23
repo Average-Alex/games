@@ -65,7 +65,7 @@ function buildBike() {
   const wheels = [];
   for (const [z, r, y] of [[0, R, 0], [L, Rf, yF]]) {
     const w = new THREE.Group(); w.position.set(0, y, z);
-    const fat = road ? (z ? 0.07 : 0.095) : st === 'grom' ? 0.085 : B.knobby ? 0.065 : 0.075;
+    const fat = st === 'scooter' ? 0.035 : road ? (z ? 0.07 : 0.095) : st === 'grom' ? 0.085 : B.knobby ? 0.065 : 0.075;
     const tire = new THREE.Mesh(new THREE.TorusGeometry(r - fat, fat, 10, 40), rubber); tire.rotation.y = Math.PI / 2; tire.castShadow = true; w.add(tire);
     const rim = new THREE.Mesh(new THREE.TorusGeometry(r - fat * 1.9, 0.014, 6, 40), B.knobby ? alloy : black); rim.rotation.y = Math.PI / 2; w.add(rim);
     if (B.knobby) {
@@ -91,18 +91,23 @@ function buildBike() {
   // Fork, clamps, bars
   const AX = V3(0, 0.906, -0.423);                  // 25° rake
   const onF = (t, x = 0) => V3(x, yF + AX.y * t, L + AX.z * t);
-  const forkLen = st === 'grom' ? 0.78 : road ? 0.8 : 0.9 + (Rf - 0.33) * 0.6;
-  for (const x of [-0.09, 0.09]) {
+  const sc = st === 'scooter';                     // a kick scooter: stem, deck, small wheels, ridden standing
+  const forkLen = sc ? 1.0 : st === 'grom' ? 0.78 : road ? 0.8 : 0.9 + (Rf - 0.33) * 0.6;
+  if (sc) {
+    // one stem from the front wheel to the bars, with the folding latch
+    seg(body, onF(0), onF(forkLen), 0.022, 0.026, M('#2a2c30', 0.4, 0.6));
+    rcube(body, onF(forkLen * 0.12).add(V3(0, 0, 0)), 0.07, 0.08, 0.07, M('#2a2c30', 0.4, 0.6));
+  } else for (const x of [-0.09, 0.09]) {
     seg(body, onF(0, x), onF(forkLen * 0.55, x), 0.022, 0.022, st === 'grom' ? black : gold);
     seg(body, onF(forkLen * 0.45, x), onF(forkLen, x), 0.034, 0.034, st === 'grom' ? alloy : black);
   }
   const qF = new THREE.Quaternion().setFromUnitVectors(Yv, AX);
-  for (const t of [forkLen * 0.8, forkLen * 0.97]) { const c = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.04, 0.08), alloy); c.position.copy(onF(t)); c.quaternion.copy(qF); body.add(c); }
-  axle(body, V3(0, yF, L), 0.016, 0.24, alloy);
-  const TOP = onF(forkLen), BAR = TOP.clone().add(V3(0, st === 'grom' ? 0.06 : st === 'sport' ? -0.04 : st === 'naked' ? 0.08 : 0.1, st === 'sport' ? -0.02 : -0.06));
-  const barW = st === 'sport' ? 0.33 : 0.42;
+  if (!sc) for (const t of [forkLen * 0.8, forkLen * 0.97]) { const c = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.04, 0.08), alloy); c.position.copy(onF(t)); c.quaternion.copy(qF); body.add(c); }
+  axle(body, V3(0, yF, L), 0.016, sc ? 0.1 : 0.24, alloy);
+  const TOP = onF(forkLen), BAR = TOP.clone().add(V3(0, sc ? 0.02 : st === 'grom' ? 0.06 : st === 'sport' ? -0.04 : st === 'naked' ? 0.08 : 0.1, st === 'sport' ? -0.02 : -0.06));
+  const barW = sc ? 0.27 : st === 'sport' ? 0.33 : 0.42;
   if (st === 'sport') for (const s of [-1, 1]) seg(body, BAR.clone().setX(s * 0.08), BAR.clone().setX(s * 0.24).add(V3(0, -0.02, -0.03)), 0.016, 0.016, black);   // clip-ons
-  else seg(body, BAR.clone().setX(-0.4), BAR.clone().setX(0.4), 0.016, 0.016, black);
+  else seg(body, BAR.clone().setX(-(barW - 0.02)), BAR.clone().setX(barW - 0.02), 0.016, 0.016, black);
   for (const s of [-1, 1]) seg(body, BAR.clone().setX(s * (barW - 0.11)), BAR.clone().setX(s * barW), 0.022, 0.022, rubber);
   rcube(body, TOP.clone().add(V3(0, 0.03, 0)), 0.08, 0.06, 0.07, black);
   for (const s of [-1, 1]) { const lv = seg(body, BAR.clone().setX(s * 0.28).add(V3(0, 0, 0.02)), BAR.clone().setX(s * 0.4).add(V3(0, -0.02, 0.09)), 0.007, 0.007, alloy); lv.castShadow = false; }
@@ -136,6 +141,11 @@ function buildBike() {
     blob(body, onF(forkLen * 0.75).add(V3(0, 0, 0.17)), 0.07, lamp, 1, 0.9, 0.4);
     const fender = rcube(body, V3(0, yF + Rf + 0.04, L + 0.02), 0.2, 0.03, 0.48, paint); fender.rotation.x = -0.05;
     void cowl;
+  } else if (sc) {
+    // a lamp on the stem and a small mudguard over the front wheel
+    blob(body, onF(forkLen * 0.78).add(V3(0, 0, 0.05)), 0.035, lamp, 1, 0.8, 0.5);
+    const fm = paint; fm.side = THREE.DoubleSide;
+    body.add(new THREE.Mesh(fenderShell(yF, L, Rf + 0.03, -0.8, 0.55, 0.08, 0.015), fm));
   } else {
     const plate = rcube(body, onF(forkLen * 0.68).add(V3(0, 0, 0.05)), 0.26, 0.3, 0.05, gas || st === 'varg' ? accent : accent); plate.quaternion.copy(qF);
     blob(body, onF(forkLen * 0.68).add(V3(0, 0.02, 0.085)), 0.06, lamp, 1, 0.8, 0.4);
@@ -147,8 +157,8 @@ function buildBike() {
 
   // Frame and swingarm
   const PIV = V3(0, 0.12, 0.56);
-  const eMoto = !gas && st !== 'varg';
-  for (const s of [-1, 1]) {
+  const eMoto = !gas && st !== 'varg' && !sc;
+  if (!sc) for (const s of [-1, 1]) {
     beam(body, V3(s * 0.075, 0, 0), PIV.clone().setX(s * 0.08), 0.03, 0.07, st === 'grom' ? alloy : frame);       // swingarm
     if (eMoto) continue;           // (the e-motos get cast side plates instead: below)
     beam(body, onF(forkLen * 0.82, s * 0.06), V3(s * 0.08, ys - 0.12, 0.72), 0.03, 0.06, frame);                   // spars
@@ -164,7 +174,14 @@ function buildBike() {
     for (const s of [-1, 1]) { const fp = new THREE.Mesh(fg, fmat); fp.position.x = s * 0.125; fp.castShadow = true; body.add(fp); }
   }
   // Shock with spring
-  {
+  if (sc) {
+    // the deck you stand on, rubber top, from the stem back over the rear wheel, and its battery underneath
+    const deckY = 0.12 - R;
+    rcube(body, V3(0, deckY, 0.4), 0.17, 0.05, 0.72, paint).castShadow = true;
+    rcube(body, V3(0, deckY + 0.027, 0.4), 0.15, 0.006, 0.64, black);
+    seg(body, V3(0, deckY, 0.78), onF(0.06), 0.02, 0.02, M('#2a2c30', 0.4, 0.6));                 // neck to the stem
+    seg(body, V3(0, deckY, 0.05), V3(0, 0, 0), 0.016, 0.016, M('#2a2c30', 0.4, 0.6));              // rear dropout
+  } else {
     const a = V3(0, 0.16, 0.42), b = V3(0, ys - 0.1, 0.58);
     seg(body, a, b, 0.018, 0.024, black);
     const d = new THREE.Vector3().subVectors(b, a), len = d.length(), pts = [];
@@ -173,7 +190,7 @@ function buildBike() {
     const sg = new THREE.Group(); sg.position.copy(a); sg.quaternion.setFromUnitVectors(Yv, d.normalize()); sg.add(spring); body.add(sg);
   }
   const midY = (ys - 0.12 + 0.05) / 2 + 0.02;
-  if (!gas) {
+  if (sc) { /* (the scooter's battery is in the deck) */ } else if (!gas) {
     // E-moto: battery box, motor, belt/chain; Varg gets a fake tank and shrouds
     const bw = st === 'rtr' ? 0.21 : 0.22, bl = st === 'rtr' ? 0.42 : 0.48;
     const box = rcube(body, V3(0, midY, 0.86), bw, ys - 0.14, bl, st === 'varg' ? black : paint); box.castShadow = true;
@@ -233,18 +250,21 @@ function buildBike() {
   }
   // Seat, side panels, tail
   const seatL = st === 'grom' ? 0.62 : road ? 0.42 : 0.78;
-  rcube(body, V3(0, ys - 0.03, road ? 0.6 : 0.55), st === 'grom' ? 0.27 : road ? 0.3 : 0.25, 0.08, seatL, black);
+  if (!sc) rcube(body, V3(0, ys - 0.03, road ? 0.6 : 0.55), st === 'grom' ? 0.27 : road ? 0.3 : 0.25, 0.08, seatL, black);
   if (road) {
     const pil = rcube(body, V3(0, ys + 0.06, 0.22), 0.2, 0.07, 0.3, black); pil.rotation.x = -0.12;          // pillion step
     for (const s of [-1, 1]) { const tl = rcube(body, V3(s * 0.11, ys - 0.02, 0.18), 0.03, 0.16, 0.62, paint); tl.rotation.set(-0.28, s * 0.08, 0); tl.castShadow = true; }
   }
-  if (!gas) for (const s of [-1, 1]) { const p = rcube(body, V3(s * 0.13, ys - 0.13, 0.62), 0.02, 0.16, 0.52, paint); p.rotation.y = s * 0.06; }
+  if (!gas && !sc) for (const s of [-1, 1]) { const p = rcube(body, V3(s * 0.13, ys - 0.13, 0.62), 0.02, 0.16, 0.52, paint); p.rotation.y = s * 0.06; }
   // rear fender / tail: a curved shell over the back wheel (road bikes keep their tail cowl)
   const tailMat = road ? paint : gas ? M(st === 'grom' || st === 'smc' ? B.color : '#f2f2f2', 0.45) : paint;
-  if (road) { const tailP = rcube(body, V3(0, ys + 0.02, 0.05), 0.2, 0.03, 0.5, tailMat); tailP.rotation.x = -0.38; }
-  else { tailMat.side = THREE.DoubleSide; const tf = new THREE.Mesh(fenderShell(0, 0, R + 0.16, -1.15, 0.55, 0.2, 0.04), tailMat); tf.castShadow = true; body.add(tf); }
-  rcube(body, V3(0, ys + 0.1, -0.17), 0.12, 0.05, 0.03, tailLamp);
-  for (const s of [-1, 1]) rcube(body, V3(s * 0.17, road ? 0.45 - R : 0.35 - R, road ? 0.52 : 0.64), 0.1, 0.025, 0.05, alloy);     // footpegs (rearsets on road bikes)
+  if (sc) { tailMat.side = THREE.DoubleSide; body.add(new THREE.Mesh(fenderShell(0, 0, R + 0.03, -0.9, 0.5, 0.08, 0.015), tailMat)); rcube(body, V3(0, 0.1, -0.12), 0.06, 0.025, 0.02, tailLamp); }
+  else {
+    if (road) { const tailP = rcube(body, V3(0, ys + 0.02, 0.05), 0.2, 0.03, 0.5, tailMat); tailP.rotation.x = -0.38; }
+    else { tailMat.side = THREE.DoubleSide; const tf = new THREE.Mesh(fenderShell(0, 0, R + 0.16, -1.15, 0.55, 0.2, 0.04), tailMat); tf.castShadow = true; body.add(tf); }
+    rcube(body, V3(0, ys + 0.1, -0.17), 0.12, 0.05, 0.03, tailLamp);
+    for (const s of [-1, 1]) rcube(body, V3(s * 0.17, road ? 0.45 - R : 0.35 - R, road ? 0.52 : 0.64), 0.1, 0.025, 0.05, alloy);     // footpegs (rearsets on road bikes)
+  }
   body.traverse((o) => { if (o.isMesh && o.castShadow === false && o.geometry && !o.isInstancedMesh) o.castShadow = true; });
 
   // Rider, seated on the back of the seat for wheelies. Limbs pivot at hip and shoulder for tricks.
@@ -275,7 +295,8 @@ function buildBike() {
   const mk = { hip: upper, hand: [], elbow: [], foot: [], knee: [] };
   for (const s of [-1, 1]) {
     const side = s > 0 ? 'L' : 'R';
-    const hip = V3(s * 0.1, ys + 0.08, 0.36), foot = V3(s * 0.17, 0.37 - R, 0.66);
+    // (on a scooter you stand on the deck, one foot ahead of the other)
+    const hip = V3(s * 0.1, ys + 0.08, 0.36), foot = sc ? V3(s * 0.07, 0.17 - R, s > 0 ? 0.55 : 0.32) : V3(s * 0.17, 0.37 - R, 0.66);
     const knee = hip.clone().lerp(foot, 0.5).add(V3(s * 0.1, 0.2, 0.2));
     const leg = new THREE.Group(); leg.position.copy(hip); rider.add(leg);
     const k = knee.clone().sub(hip), f = foot.clone().sub(hip);
@@ -342,5 +363,5 @@ function buildBike() {
   rig = { root, body, wheels, rider, upper, head, eye, chest, barCam, dashCv, dashTex, B, paint, accent, ...limbs,
     riderHome: { p: rider.position.clone(), q: rider.quaternion.clone() }, upperHome: upper.rotation.clone(), ragdoll: null, mk };
   // the realistic rider body, once the people models have loaded (else when they do: life.js)
-  if (typeof attachRiderModel === 'function') attachRiderModel(rig);
+  if (typeof attachRiderModel === 'function' && !(typeof bikePropMode !== 'undefined' && bikePropMode)) attachRiderModel(rig);
 }

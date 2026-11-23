@@ -186,6 +186,7 @@ function placeOnRoad(x, z, heading, v, allowHwy) {
   resetRider(best[0], best[1], best[2], v);
 }
 function resetWorld() {
+  if (FOOT.on) { if (FOOT.store) leaveStore(); hopOn(); }
   clearTiles();
   for (const u of units) deactivate(u);
   if (heli) { heli.on = false; heli.g.visible = false; heli.beam.visible = false; heli.spot.intensity = 0; }
@@ -224,7 +225,7 @@ function renderBails() {
 
 // ---------------------------------------------------------------- input
 const keys = new Set();
-const GAME_KEYS = ['Space', 'KeyB', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'ShiftLeft', 'ShiftRight', 'KeyR', 'KeyM', 'KeyV', 'KeyN', 'KeyP', 'KeyE', 'KeyF', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'];
+const GAME_KEYS = ['Space', 'KeyB', 'KeyT', 'KeyI', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'ShiftLeft', 'ShiftRight', 'KeyR', 'KeyM', 'KeyV', 'KeyN', 'KeyP', 'KeyE', 'KeyF', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'];
 let noLock = false;
 addEventListener('keydown', (e) => {
   if (e.target && e.target.tagName === 'INPUT') return;          // typing in the map search box
@@ -244,10 +245,16 @@ addEventListener('keydown', (e) => {
       if (B.type === 'gas') { const f = S.rpm / B.engine.redline; kick = 0.8 + 1.4 * f; S.clutchDump = 1; }
       S.omega += kick / B.inertia; S.popCd = 0.9; sfx.pop();
     }
-    if (e.code === 'KeyR' && !S.crashed) { respawn(); popup('Reset'); }
     if (e.code === 'KeyM') toggleMute();
-    // E / F at a station walks you in; on the train E gets off, F rides back, V changes the view
-    if (e.code === 'KeyE' || e.code === 'KeyF') transitKey(e.code);
+    // on foot (foot.js) the keys are its own: F rides, E robs or enters shops, 1-3 weapons, R reloads
+    if (FOOT.on) footKey(e.code);
+    else if (e.code === 'KeyT' || (FOOT.menu && e.code === 'Escape')) { if (FOOT.menu) closeStoreMenu(); else openMarket(); }   // the online market, from the bike too
+    else {
+      if (e.code === 'KeyR' && !S.crashed) { respawn(); popup('Reset'); }
+      // E / F at a station walks you in; on the train E gets off, F rides back, V changes the view; F elsewhere hops off
+      if ((e.code === 'KeyE' || e.code === 'KeyF') && transitKey(e.code)) { /* handled by the station / train */ }
+      else if (e.code === 'KeyF') footKey('KeyF');
+    }
     if (e.code === 'KeyN') toggleMap();
     if (e.code === 'KeyP' || (e.code === 'Escape' && noLock)) pause();
   } else if (state === 'over' && e.code === 'Enter') begin(true);
@@ -257,6 +264,7 @@ addEventListener('blur', () => { keys.clear(); if (state === 'play') pause(); })
 document.addEventListener('mousemove', (e) => {
   if (state !== 'play' || mapOpen) return;
   if (WALK.on || RIDE.on) { transitLook(e.movementX, e.movementY); return; }
+  if (FOOT.on) { footMouse(e.movementX, e.movementY); return; }
   S.steerMouse = clamp(S.steerMouse + e.movementX * 0.003 * sens, -1, 1);
   S.leanIn = clamp(S.leanIn - e.movementY * 0.004 * sens, -1, 1);
 });
@@ -269,7 +277,7 @@ function lockFailed() {
   const n = $('#lockNote'); n.hidden = false; n.textContent = 'Mouse capture is blocked here, so steer with A and D and lean with Shift and Q. Pause with P.';
 }
 document.addEventListener('pointerlockerror', lockFailed);
-document.addEventListener('pointerlockchange', () => { if (document.pointerLockElement !== canvas && state === 'play' && !noLock && !mapOpen) pause(); });
+document.addEventListener('pointerlockchange', () => { if (document.pointerLockElement !== canvas && state === 'play' && !noLock && !mapOpen && !FOOT.menu) pause(); });
 canvas.addEventListener('click', () => { if (state === 'play' && !document.pointerLockElement) lockPointer(); });
 // The city map frees the mouse so you can click a destination; the ride is paused while it's open
 function toggleMap() {
@@ -710,6 +718,27 @@ function makePoints(n, size, color) {
 }
 FX.sparks = makePoints(400, 0.09, 'add');
 FX.splash = makePoints(300, 0.16, 'normal');
+FX.blood = makePoints(300, 0.07, 'normal');
+// a short spray of blood from a hit, flying away from the attacker
+function spawnBlood(x, y, z, dx, dz, n) {
+  const F = FX.blood;
+  for (let k = 0; k < n; k++) {
+    const i = F.next = (F.next + 1) % F.n;
+    F.pos.set([x + (Math.random() - 0.5) * 0.15, y + (Math.random() - 0.5) * 0.2, z + (Math.random() - 0.5) * 0.15], i * 3);
+    F.vel.set([dx * (1 + Math.random() * 2) + (Math.random() - 0.5) * 1.5, 0.5 + Math.random() * 1.8, dz * (1 + Math.random() * 2) + (Math.random() - 0.5) * 1.5], i * 3);
+    F.life[i] = 0.4 + Math.random() * 0.5;
+  }
+}
+// a dark pool spreading under someone who's down (removed with them)
+const POOL_GEO = new THREE.CircleGeometry(1, 20).rotateX(-Math.PI / 2);
+const POOL_MAT = new THREE.MeshBasicMaterial({ color: '#3a0306', transparent: true, opacity: 0.85, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+function bloodPool(x, y, z) {
+  const m = new THREE.Mesh(POOL_GEO, POOL_MAT); m.position.set(x, y + 0.02, z); m.scale.setScalar(0.05); m.renderOrder = 1;
+  m.userData.grow = 0; scene.add(m); FX.pools.push(m);
+  if (FX.pools.length > 24) scene.remove(FX.pools.shift());
+  return m;
+}
+FX.pools = [];
 FX.skids = (() => {
   const N = 700, im = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.13, 0.42).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#0b0b0c', transparent: true, opacity: 0.55, depthWrite: false }), N);
   im.count = 0; im.frustumCulled = false; scene.add(im);
@@ -800,7 +829,8 @@ function updateFX(d) {
     if (p.life < 1) p.m.scale.multiplyScalar(Math.max(0.01, 1 - d * 2));
     if (p.life <= 0) p.m.visible = false;
   }
-  for (const [F, grav, hot] of [[FX.sparks, 9, true], [FX.splash, 9, false]]) {
+  for (const m of FX.pools) if (m.userData.grow < 1) { m.userData.grow = Math.min(1, m.userData.grow + d / 5); m.scale.setScalar(0.1 + 0.85 * Math.sqrt(m.userData.grow)); }
+  for (const [F, grav, hot] of [[FX.sparks, 9, true], [FX.splash, 9, false], [FX.blood, 9, 'blood']]) {
     let any = false;
     for (let i = 0; i < F.n; i++) {
       if (F.life[i] <= 0) { if (F.pos[i * 3 + 1] > -50) { F.pos[i * 3 + 1] = -100; any = true; } continue; }
@@ -809,14 +839,16 @@ function updateFX(d) {
       F.pos[i * 3] += F.vel[i * 3] * d; F.pos[i * 3 + 1] += F.vel[i * 3 + 1] * d; F.pos[i * 3 + 2] += F.vel[i * 3 + 2] * d;
       if (F.pos[i * 3 + 1] < 0.02) { F.pos[i * 3 + 1] = 0.02; F.vel[i * 3 + 1] *= -0.3; F.vel[i * 3] *= 0.7; F.vel[i * 3 + 2] *= 0.7; }
       const l = clamp(F.life[i] * 2, 0, 1);
-      if (hot) F.col.set([1, 0.55 + 0.45 * l, 0.15 + 0.6 * l * l], i * 3); else F.col.set([0.85 * l + 0.1, 0.92 * l + 0.05, 1 * l], i * 3);
+      if (hot === 'blood') F.col.set([0.35 + 0.15 * l, 0.01, 0.02], i * 3);
+      else if (hot) F.col.set([1, 0.55 + 0.45 * l, 0.15 + 0.6 * l * l], i * 3); else F.col.set([0.85 * l + 0.1, 0.92 * l + 0.05, 1 * l], i * 3);
     }
     if (any) { F.p.geometry.attributes.position.needsUpdate = true; F.p.geometry.attributes.color.needsUpdate = true; }
   }
 }
 function clearFX() {
   for (const p of FX.debris) { p.life = 0; p.m.visible = false; }
-  for (const F of [FX.sparks, FX.splash]) { F.life.fill(0); for (let i = 0; i < F.n; i++) F.pos[i * 3 + 1] = -100; F.p.geometry.attributes.position.needsUpdate = true; }
+  for (const m of FX.pools) scene.remove(m); FX.pools.length = 0;
+  for (const F of [FX.sparks, FX.splash, FX.blood]) { F.life.fill(0); for (let i = 0; i < F.n; i++) F.pos[i * 3 + 1] = -100; F.p.geometry.attributes.position.needsUpdate = true; }
   FX.skids.im.count = 0; FX.skids.next = 0;
   FX.smoke.age.fill(0); FX.smoke.live = 0.1;
 }
@@ -825,7 +857,7 @@ function flash(v) { flashV = Math.max(flashV, v); }
 
 // ---------------------------------------------------------------- wanted level and police
 function copNear(range) {
-  for (const u of units) if (u.on && u.kind !== 'car' && Math.hypot(u.x - S.x, u.z - S.z) < range) return true;
+  for (const u of units) if (u.on && !u.player && !u.parked && u.kind !== 'car' && Math.hypot(u.x - S.x, u.z - S.z) < range) return true;
   return !!(heli && heli.on && Math.hypot(heli.x - S.x, heli.z - S.z) < 70);
 }
 function offense(amount) { if (copNear(70)) addHeat(amount, false); }
@@ -837,7 +869,7 @@ function addHeat(amount) {
   unseenT = 0;
   if (stars() > before) {
     popup(`${stars()} star${stars() > 1 ? 's' : ''}`, 'cop');
-    const c = units.filter((u) => u.on && u.kind !== 'car').sort((a, b) => Math.hypot(a.x - S.x, a.z - S.z) - Math.hypot(b.x - S.x, b.z - S.z))[0];
+    const c = units.filter((u) => u.on && !u.player && !u.parked && u.kind !== 'car').sort((a, b) => Math.hypot(a.x - S.x, a.z - S.z) - Math.hypot(b.x - S.x, b.z - S.z))[0];
     if (c) sfx.whoop(c);
   }
   chaseMax = Math.max(chaseMax, stars()); maxStarsRun = Math.max(maxStarsRun, stars());
@@ -850,7 +882,7 @@ const MEGA_CHASE = ['STOP THE BIKE!', 'You’re not getting away!', 'Pull over N
 const MEGA_RAM = ['Taking him out!', 'PIT, PIT, PIT!', 'Box him in!', 'Ram the bike!'];
 function leadCop() {
   let best = null, bd = 1e9;
-  for (const u of units) if (u.on && u.kind !== 'car' && u.chasing) { const dd = Math.hypot(u.x - S.x, u.z - S.z); if (dd < bd) { bd = dd; best = u; } }
+  for (const u of units) if (u.on && !u.player && !u.parked && u.kind !== 'car' && u.chasing) { const dd = Math.hypot(u.x - S.x, u.z - S.z); if (dd < bd) { bd = dd; best = u; } }
   return best ? [best, bd] : [null, 1e9];
 }
 function pulledOver(cop) {
@@ -859,7 +891,7 @@ function pulledOver(cop) {
   popup(`Pulled over · ticket${fine ? ` −${fine}` : ''}`, 'cop');
   say(cop, pick(Math.random, ['Here’s your ticket. Ride safe.', 'Slow it down out there.', 'Licence and registration… OK, you’re free to go.']), false);
   heat = 0; chaseMax = 0; PURSUIT.phase = 'none';
-  for (const u of units) if (u.on && u.kind !== 'car') { u.chasing = false; u.parkT = 5; }
+  for (const u of units) if (u.on && !u.player && !u.parked && u.kind !== 'car') { u.chasing = false; u.parkT = 5; }
 }
 function updatePursuit(d, st) {
   if (st === 0) { PURSUIT.phase = 'none'; return; }
@@ -888,7 +920,7 @@ function updatePursuit(d, st) {
 function updatePolice(d) {
   const st = stars();
   updatePursuit(d, st);
-  for (const u of units) if (u.on && u.kind !== 'car') {
+  for (const u of units) if (u.on && !u.player && !u.parked && u.kind !== 'car') {
     if (u.parkT > 0) { u.parkT -= d; continue; }
     if (st >= 1 && !u.chasing && Math.hypot(u.x - S.x, u.z - S.z) < 180) { u.chasing = true; u.next = null; u.tac = Math.random() < 0.6 ? 'ram' : 'box'; }
     if (st === 0) u.chasing = false;
@@ -908,7 +940,7 @@ function updatePolice(d) {
     if (heat < 1 && chaseMax >= 1) {
       const bonus = 400 * chaseMax; banked += bonus; popup(`Lost them +${bonus.toLocaleString()}`, 'good');
       heat = 0; chaseMax = 0;
-      for (const u of units) if (u.on && u.kind !== 'car') u.chasing = false;
+      for (const u of units) if (u.on && !u.player && !u.parked && u.kind !== 'car') u.chasing = false;
     }
   } else if (heat > 0 && !copNear(120)) heat = Math.max(0, heat - 0.05 * d);
   if (heli.on && st < 3 && Math.hypot(heli.x - S.x, heli.z - S.z) > 120) { heli.on = false; heli.g.visible = false; }
@@ -917,9 +949,10 @@ function updateUnits(d) {
   let cars = 0;
   const px = S.riding ? 1e9 : S.crashed && S.cb ? S.cb.x : S.x, pz = S.riding ? 1e9 : S.crashed && S.cb ? S.cb.z : S.z;
   for (const u of units) {
-    if (!u.on) continue;
+    if (!u.on || u.player) continue;               // (the car you're driving: drive.js moves it)
     const dist = Math.hypot(u.x - S.x, u.z - S.z);
     if (dist > 330) { deactivate(u); continue; }
+    if (u.parked) continue;                          // a car you left: it stays put
     u.hitT -= d;
     const fx = Math.sin(u.yaw), fz = Math.cos(u.yaw);
     if (u.kind === 'car') {
@@ -1012,10 +1045,18 @@ function updateUnits(d) {
 }
 function busted() {
   popup('BUSTED', 'cop');
+  if (FOOT.on) {
+    // arrested on foot: weapons taken, a fine out of your cash, back to the bike
+    if (FOOT.store) leaveStore();
+    const f = Math.round(cash * 0.15); if (f) { addCash(-f); popup(`Fine −$${f}`, 'bad'); }
+    if (Object.keys(FOOT.has).some((k) => k !== 'fists' && FOOT.has[k])) popup('Weapons confiscated', 'bad');
+    FOOT.has = { fists: true }; FOOT.mag = {}; FOOT.res = {}; FOOT.weapon = 'fists'; saveGuns();
+    hopOn();
+  }
   const fine = Math.min(banked, 600 * stars());
   if (fine) { banked -= fine; popup(`Fine −${fine.toLocaleString()}`, 'bad'); }
   heat = 0; chaseMax = 0;
-  for (const u of units) if (u.on && u.kind !== 'car') { u.chasing = false; if (Math.hypot(u.x - S.x, u.z - S.z) < 40) deactivate(u); }
+  for (const u of units) if (u.on && !u.player && !u.parked && u.kind !== 'car') { u.chasing = false; if (Math.hypot(u.x - S.x, u.z - S.z) < 40) deactivate(u); }
   bails--; renderBails();
   S.crashReason = 'Busted';
   if (bails <= 0) { gameOver(); return; }
@@ -1102,6 +1143,12 @@ let last = performance.now(), menuT = 0, hudT = 0, dashT = 0, hintUntil = 0, map
 function placeRig(dt) {
   const B = BIKES[bikeKey], r = rig.root;
   r.rotation.order = 'YXZ';
+  if (FOOT.on && FOOT.park) {
+    // parked where you left it, leaning on its stand
+    const P = FOOT.park; r.position.set(P.x, P.y + B.R, P.z); r.rotation.set(0, P.psi, 0.12);
+    rig.body.position.set(0, 0, 0); rig.body.rotation.set(0, 0, 0);
+    return;
+  }
   if (S.crashed && S.cb) {
     r.position.set(S.cb.x, S.cb.y, S.cb.z);
     r.rotation.set(S.cb.rx, S.cb.ry, S.cb.rz);
@@ -1155,7 +1202,11 @@ function updateCamera(dt) {
   rig.head.visible = !(inPlay && pov === 'first' && !(S.crashed && reduceMotion));
   let fovT = 66 + Math.min(16, S.v * 0.45);
   let up = 0;
-  if ((WALK.on || (S.riding && RIDE.train)) && state !== 'menu') {
+  if (state === 'wardrobe') {
+    wardrobeCamera(); fovT = camera.fov;
+  } else if (FOOT.on && state !== 'menu') {
+    footCamera(dt); fovT = camera.fov;
+  } else if ((WALK.on || (S.riding && RIDE.train)) && state !== 'menu') {
     transitCamera(dt); fovT = camera.fov;
   } else if (state === 'menu') {
     menuT += dt * 0.25;
@@ -1365,7 +1416,8 @@ function frame(now) {
   const rawMs = now - last, dt = clamp(rawMs / 1000, 0, 0.05); last = now;
   if (!MAP || !rig) { if (renderer) renderer.render(scene, camera); return; }
   governFrame(rawMs, state === 'play' && !mapOpen && rawMs < 500);
-  if (state === 'play' && !mapOpen) {
+  if (state === 'play' && !mapOpen && FOOT.menu) { /* a menu (store, market) is open: the world waits */ }
+  else if (state === 'play' && !mapOpen) {
     if (S.hitStop > 0) { S.hitStop -= dt; }
     else {
       const ts = S.crashed && S.crashT < 0.7 && !reduceMotion ? 0.35 : 1;
@@ -1373,7 +1425,8 @@ function frame(now) {
       simTime += rem;
       while (rem > 1e-6) {
         const d = Math.min(1 / 120, rem);
-        if (!S.riding && !WALK.on) step(d); if (state !== 'play') break;
+        if (FOOT.on) footStep(d); else if (!S.riding && !WALK.on) step(d);
+        if (state !== 'play') break;
         updateUnits(d); if (state !== 'play') break;
         updatePolice(d);
         rem -= d;
@@ -1386,10 +1439,11 @@ function frame(now) {
     }
     const fx = S.crashed && S.cb ? S.cb.x : S.x, fz = S.crashed && S.cb ? S.cb.z : S.z;
     updateTiles(fx, fz, false);
-    if (state === 'play') updateHUD(dt);
+    if (state === 'play') { updateHUD(dt); footFrame(dt); }
     dashT += dt; if (dashT > 0.1) { dashT = 0; drawDash(); }
   } else if (state === 'play' && mapOpen) { drawBigMap(); }
   else if (state === 'menu') { updateTiles(S.x, S.z, false); simTime += dt; updateWeather(dt, null); }
+  else if (state === 'wardrobe') updateWardrobe(dt);
   updateSignals(simTime);
   placeRig(state === 'play' && !mapOpen ? dt : 0);
   updateCamera(dt);

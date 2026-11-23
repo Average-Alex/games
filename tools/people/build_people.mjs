@@ -58,4 +58,6 @@ for (const h of ['Hair_SimpleParted', 'Hair_Buzzed', 'Hair_Long', 'Hair_Buns', '
   await strip(path.join(hairDir, h + '.gltf'), h.toLowerCase() + '.glb');
 }
 await strip(path.join(SRC, 'anim/Universal Animation Library[Standard]/Unreal-Godot/UAL1_Standard.glb'), 'anims.glb',
-  ['Walk_Loop', 'Walk_Formal_Loop', 'Idle_Loop', 'Idle_Talking_Loop', 'Jog_Fwd_Loop', 'Hit_Chest', 'Death01', 'Dance_Loop'], true);
+  ['Walk_Loop', 'Walk_Formal_Loop', 'Idle_Loop', 'Idle_Talking_Loop', 'Jog_Fwd_Loop', 'Sprint_Loop', 'Hit_Chest', 'Hit_Head', 'Death01', 'Dance_Loop',
+    // on foot: fighting, the pistol, and the shopkeeper
+    'Punch_Jab', 'Punch_Cross', 'Sword_Attack', 'Pistol_Idle_Loop', 'Pistol_Aim_Neutral', 'Pistol_Shoot', 'Interact', 'Roll', 'Crouch_Idle_Loop', 'Driving_Loop'], true);
