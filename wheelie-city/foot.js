@@ -94,8 +94,11 @@ function buildFootFigure() {
   const slide = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.035, 0.17), gm); slide.position.set(0, 0.02, 0.05); gun.add(slide);
   const grip = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.09, 0.035), gm); grip.position.set(0, -0.03, -0.01); grip.rotation.x = 0.25; gun.add(grip);
   const knife = new THREE.Group();
-  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.025, 0.17), new THREE.MeshStandardMaterial({ color: '#d8dde2', roughness: 0.15, metalness: 1 })); blade.position.z = 0.1; knife.add(blade);
-  knife.add(new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.028, 0.08), new THREE.MeshStandardMaterial({ color: '#1a1a1a', roughness: 0.7 })));
+  // (a big hunting knife: a bright blade, a guard and a dark handle, so it reads from the camera)
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.038, 0.22), new THREE.MeshStandardMaterial({ color: '#e8ecf0', roughness: 0.2, metalness: 0.6, emissive: '#3a3e44' })); blade.position.set(0, 0.008, 0.16); knife.add(blade);
+  const tip = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.026, 0.04), blade.material); tip.position.set(0, 0.014, 0.285); tip.rotation.x = 0.5; knife.add(tip);
+  const guard = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.07, 0.014), new THREE.MeshStandardMaterial({ color: '#8a8e94', metalness: 0.8, roughness: 0.3 })); guard.position.z = 0.05; knife.add(guard);
+  knife.add(new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.034, 0.1), new THREE.MeshStandardMaterial({ color: '#1a1a1a', roughness: 0.7 })));
   // the long guns: a box-section receiver, barrel, magazine and stock (wood on the AK)
   const box = (grp, w, h, d, x, y, z, m, rx = 0) => { const me = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); me.position.set(x, y, z); me.rotation.x = rx; grp.add(me); return me; };
   const wood = new THREE.MeshStandardMaterial({ color: '#6a3e1e', roughness: 0.6 });
@@ -114,7 +117,7 @@ function buildFootFigure() {
   for (const [grp, z] of [[gun, 0.16], [smg, 0.27], [rifle, 0.72], [shotgun, 0.75]]) { const f = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), flashM); f.position.set(0, 0.03, z); f.visible = false; grp.add(f); flashes.push(f); }
   const flash = { set visible(v) { for (const f of flashes) f.visible = v; } };
   const g = new THREE.Group(); g.add(root); g.visible = false; scene.add(g);
-  FOOT.fig = { g, root, mixer: base.mixer, actions: base.actions, cur: null, gun, guns, knife, flash };
+  FOOT.fig = { g, root, mixer: base.mixer, actions: base.actions, cur: null, gun, guns, knife, flash, hand, holder };
   return FOOT.fig;
 }
 
@@ -162,6 +165,7 @@ function footKey(code) {
     else popup('Nothing to ride here: walk back to your bike');
     return true;
   }
+  if (code === 'KeyT') { openMarket(); return true; }                 // (the online market works from the driver's seat too)
   if (FOOT.car) return code === 'KeyE' || code.startsWith('Digit');   // (no fighting from the driver's seat)
   if (code === 'Digit1') { FOOT.weapon = 'fists'; return true; }
   if (code === 'Digit2') { if (FOOT.has.knife) FOOT.weapon = 'knife'; else popup('No knife: buy one in a store'); return true; }
@@ -278,6 +282,8 @@ function syncPlayerState() {
   if (FOOT.store) { fig.g.position.set(FOOT.x, STORE_Y, FOOT.z); }
   else fig.g.position.set(FOOT.x, FOOT.y, FOOT.z);
   fig.g.rotation.y = FOOT.yaw;
+  // the weapon points where you face: level and up/down with the view when aiming, a bit low otherwise
+  if (fig.hand && (fig.knife.visible || isGun(FOOT.weapon))) aimHeld(fig.holder, fig.hand, FOOT.yaw, FOOT.aiming && isGun(FOOT.weapon) ? FOOT.camPitch * 0.6 : fig.knife.visible ? 0.15 : 0.3);
 }
 function footHurt(dmg, why, vx = 0, vz = 0) {
   // body armour soaks up most of a hit until it's used up
@@ -492,7 +498,7 @@ function roomAdd(geo, mat, x, y, z, solid) { const me = new THREE.Mesh(geo, mat)
 function clearRoom() {
   if (ROOM.g) { scene.remove(ROOM.g); for (const d of ROOM.disp) d.dispose && d.dispose(); }
   for (const p of ROOM.people) scene.remove(p.g);
-  Object.assign(ROOM, { g: null, solids: [], people: [], loot: [], shelves: [], spots: [], anim: [], disp: [], called: 0, alarm: false, box: { ...ROOM_BOX }, hold: null, guardT: 0, counter: { x: 4.2, z: 2.8 }, raidT: 0, raidNext: 0, raided: false, back: null });
+  Object.assign(ROOM, { g: null, solids: [], people: [], loot: [], shelves: [], spots: [], anim: [], disp: [], called: 0, alarm: false, box: { ...ROOM_BOX }, hold: null, guardT: 0, counter: { x: 4.2, z: 2.8 }, raidT: 0, raidNext: 0, raided: false, back: null, items: null });
   if (typeof FCOPS !== 'undefined') for (const p of FCOPS.slice()) if (p.inRoom) removeFootCop(p);
   ROOM.door.z = ROOM.box.z0 + 0.4;
 }
@@ -580,6 +586,8 @@ function buildStoreRoom(shop) {
   // restaurants, bars, banks, clothes shops and casinos have their own interiors (interiors.js)
   const ik = interiorKind(shop.kind);
   if (ik !== 'store') { INTERIORS[ik](shop); return; }
+  // every other shop is fitted out for what it sells, and laid out its own way (shops.js)
+  if (typeof buildShop === 'function') { buildShop(shop); return; }
   ROOM.kind = 'store'; roomShell(shop.bi, '#d8d6d0', '#e4dccb');
   const shelfM = roomMat('#9aa0a6', 0.3), prod = new THREE.BoxGeometry(0.18, 0.24, 0.14); ROOM.disp.push(prod);
   const pcols = ['#d8312a', '#2a6ad8', '#f2c230', '#2aa05a', '#e86a1a', '#f2f2f2', '#7a3ad8', '#1a1a1a'];
@@ -646,7 +654,7 @@ function mirrorRoom() {
   for (const p of ROOM.people) { p.x = -p.x; p.yaw = -p.yaw; p.g.position.x = p.x; p.g.rotation.y = p.yaw; }
   for (const s of ROOM.spots) s.x = -s.x;
   for (const l of ROOM.loot) l.x = -l.x;
-  for (const s of ROOM.shelves) s.x = -s.x;
+  for (const s of ROOM.shelves) { if (s.x0 != null) { const a = -s.x1; s.x1 = -s.x0; s.x0 = a; } else s.x = -s.x; }
   ROOM.counter = { x: -ROOM.counter.x, z: ROOM.counter.z };
   if (ROOM.vault) ROOM.vault.x = -ROOM.vault.x;
 }
@@ -705,7 +713,8 @@ function storeBlocked(x, z) {
 // E inside: the counter, a shelf, a valuable, or a person
 function nearCounter() { return ROOM.kind === 'store' && Math.hypot(FOOT.x - ROOM.counter.x, FOOT.z - (ROOM.counter.z - 1.3)) < 1.8; }
 function nearLoot() { let best = null, bd = 1.6; for (const l of ROOM.loot) { const d = Math.hypot(l.x - FOOT.x, l.z - FOOT.z); if (d < bd) { bd = d; best = l; } } return best; }
-function nearShelf() { return ROOM.kind === 'store' && ROOM.shelves.some((s) => Math.abs(FOOT.x - s.x) < 1.2 && FOOT.z > s.z0 - 0.3 && FOOT.z < s.z1 + 0.3); }
+// (a shelf is a run along z at x, or a rectangle x0..x1, z0..z1 for wall shelves and display tables)
+function nearShelf() { return ROOM.kind === 'store' && ROOM.shelves.some((s) => s.x0 != null ? FOOT.x > s.x0 - 1.0 && FOOT.x < s.x1 + 1.0 && FOOT.z > s.z0 - 1.0 && FOOT.z < s.z1 + 1.0 : Math.abs(FOOT.x - s.x) < 1.2 && FOOT.z > s.z0 - 0.3 && FOOT.z < s.z1 + 0.3); }
 function roomInteract() {
   if (nearCounter()) { openStoreMenu(); return; }
   const s = nearSpot();
@@ -722,7 +731,7 @@ function roomInteract() {
   }
   if (nearShelf()) {
     // shoplifting: the cashier might see
-    const items = [['Energy drinks', 8, 20], ['Snacks', 5, 15], ['Phone charger', 15, 40], ['Sunglasses', 20, 60], ['Headphones', 30, 90]];
+    const items = ROOM.items || [['Energy drinks', 8, 20], ['Snacks', 5, 15], ['Phone charger', 15, 40], ['Sunglasses', 20, 60], ['Headphones', 30, 90]];
     const it = items[Math.floor(Math.random() * items.length)], v = Math.round(it[1] + Math.random() * (it[2] - it[1]));
     if (!takeItem(it[0], v)) return;
     const cashier = ROOM.people.find((q) => q.role === 'cashier' && !q.dead && !q.cower);

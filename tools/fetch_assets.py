@@ -53,6 +53,10 @@ SKIES = {
     'night_vegas': 'qwantani_night_puresky',
     'clear_miami': 'table_mountain_1_puresky',
     'dusk_nyc': 'qwantani_dusk_2_puresky',
+    'day_la': 'qwantani_afternoon_puresky',      # LA in the daytime: clear blue, the sun well up
+    'day_vegas': 'qwantani_noon_puresky',        # desert noon
+    'day_nyc': 'kloofendal_43d_clear_puresky',   # a clear midday
+
 }
 
 
@@ -155,8 +159,11 @@ def read_hdr(data):
 
 def skies():
     os.makedirs(os.path.join(ROOT, 'sky'), exist_ok=True)
-    meta = {}
+    sp = os.path.join(ROOT, 'sky', 'sky.json')
+    meta = json.load(open(sp)) if os.path.exists(sp) else {}
     for name, pid in SKIES.items():
+        # (only the ones not fetched yet; delete a sky's .jpg to fetch it again)
+        if name in meta and os.path.exists(os.path.join(ROOT, 'sky', f'{name}.jpg')): continue
         print(name, pid, flush=True)
         files = json.loads(get(f'https://api.polyhaven.com/files/{pid}'))
         hdr = read_hdr(get(files['hdri']['4k']['hdr']['url']))

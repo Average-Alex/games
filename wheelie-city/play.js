@@ -1441,6 +1441,12 @@ function updateHUD(dt) {
     $('#rpmFill').style.width = `${clamp(S.rpm / B.engine.redline, 0, 1) * 100}%`;
     $('#rpmBar').classList.toggle('red', S.rpm > B.engine.redline * 0.92);
   } else { $('#gear').textContent = ''; $('#rpmBar').hidden = true; }
+  // the dial speedo (drive.js): on any bike or scooter, and in cars; not on foot or on the train
+  if (typeof speedo !== 'undefined') {
+    const bike = !FOOT.on && !WALK.on && !RIDE.on;
+    speedo.hidden = !(bike || FOOT.car);
+    if (bike) updateBikeSpeedo(B);
+  }
   hudT += dt; if (hudT < 0.12) return; hudT = 0;
   $('#spd').textContent = Math.round(S.v * 3.6);
   // street name: on a road, its name and highway shield; otherwise sidewalk / park / beach

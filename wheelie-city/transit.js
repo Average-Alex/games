@@ -450,6 +450,7 @@ function startTrainRide() {
   t.hold = false; t.dwell = Math.min(t.dwell, 3.5); t.call = null; t.boardSt = WALK.st; t.departed = false;
   attachScreens(cg); fillCar(cg, WALK.seat);
   camSnap = true;
+  if (carPeople && carPeople.children.length) setTimeout(() => RIDE.on && popup('Look at a passenger and press E to rob them', ''), 2500);
 }
 function leaveTrain() {
   const t = RIDE.train, st = t && t.atSt;
@@ -507,7 +508,33 @@ function makePerson(seed, pose) {
   if (pose === 'seat') { body.position.y = -0.4; legL.rotation.x = legR.rotation.x = -1.45; }
   if (pose === 'hold') armR.rotation.set(-2.9, 0, 0.1);      // holding the overhead rail
   g.scale.setScalar(0.9 + r() * 0.18);
+  g.userData.arms = [armL, armR];
   return g;
+}
+// Robbing a passenger: look at someone near your seat and press E. They hand over their wallet or phone (hands up),
+// the car panics, and someone calls it in: you'll have a wanted level when you get off.
+const TRAIN_ROB_LINES = ['"Take it, just take it!"', '"Please, I don\'t want any trouble"', '"OK, OK! Here!"', '"Seriously?! On the train?"'];
+function passengerInView() {
+  if (!carPeople || RIDE.view !== 'seat') return null;
+  const dir = camera.getWorldDirection(new THREE.Vector3()), w = new THREE.Vector3();
+  let best = null, bd = 0.9;
+  for (const p of carPeople.children) {
+    if (p.userData.robbed) continue;
+    p.getWorldPosition(w); w.y += 0.9; w.sub(camera.position);
+    const L = w.length(); if (L > 3.8) continue;
+    const dot = w.dot(dir) / L; if (dot > bd) { bd = dot; best = p; }
+  }
+  return best;
+}
+function robPassenger(p) {
+  p.userData.robbed = true;
+  const [aL, aR] = p.userData.arms; aL.rotation.set(-2.8, 0, -0.35); aR.rotation.set(-2.8, 0, 0.35);    // hands up
+  const amt = 15 + Math.floor(Math.random() * 140), what = Math.random() < 0.35 ? 'phone' : 'wallet';
+  if (what === 'phone' && typeof takeItem === 'function' && takeItem('Phone', 60 + Math.floor(Math.random() * 160))) popup(pick(Math.random, TRAIN_ROB_LINES), '');
+  else { addCash(amt); popup(`Robbed a passenger +$${amt} · ${pick(Math.random, TRAIN_ROB_LINES)}`, 'good'); sfx.cash && sfx.cash(); }
+  // the rest of the car: some put their hands up too, and somebody's on the phone to transit police
+  for (const q of carPeople.children) if (q !== p && !q.userData.robbed && Math.random() < 0.3) { const [l, r2] = q.userData.arms; l.rotation.set(-2.6, 0, -0.4); r2.rotation.set(-2.6, 0, 0.4); }
+  addHeat(0.9);
 }
 function disposePeople(grp) { if (!grp) return; if (grp.parent) grp.parent.remove(grp); grp.traverse((o) => o.geometry && o.geometry.dispose()); }
 let carPeople = null, platPeople = null;
@@ -684,7 +711,7 @@ function transitKey(code) {
   if (S.riding && t) {
     if (code === 'KeyV') { RIDE.view = RIDE.view === 'seat' ? 'front' : RIDE.view === 'front' ? 'outside' : 'seat'; popup(RIDE.view === 'seat' ? 'Your seat' : RIDE.view === 'front' ? 'Front window' : 'Outside'); camSnap = true; return true; }
     if (code === 'KeyF') { reverseTrain(); return true; }
-    if (code === 'KeyE') { if (canLeave(t)) leaveTrain(); else popup(t.atSt ? 'Departing…' : 'Wait for the next stop'); return true; }
+    if (code === 'KeyE') { const victim = passengerInView(); if (victim) { robPassenger(victim); return true; } if (canLeave(t)) leaveTrain(); else popup(t.atSt ? 'Departing…' : 'Wait for the next stop'); return true; }
     return false;
   }
   if ((code === 'KeyE' || code === 'KeyF') && RIDE.near && !S.crashed) {

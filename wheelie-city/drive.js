@@ -154,29 +154,45 @@ function driveStep(d) {
 // ---------------------------------------------------------------- the dash: a speedo dial, rev bar, gear and damage
 const speedo = document.createElement('div'); speedo.id = 'speedo'; speedo.hidden = true;
 speedo.innerHTML = `<svg viewBox="0 0 200 200" aria-hidden="true">
+  <circle cx="100" cy="100" r="93" fill="rgba(10,12,18,.5)"/>
   <path d="M38 158 A80 80 0 1 1 162 158" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="12" stroke-linecap="round"/>
   <path class="rev" d="M38 158 A80 80 0 1 1 162 158" fill="none" stroke="#ff3d7f" stroke-width="12" stroke-linecap="round" pathLength="100" stroke-dasharray="0 100"/>
   ${Array.from({ length: 9 }, (_, i) => { const a = (-225 + i * 33.75) * Math.PI / 180; return `<line x1="${100 + Math.cos(a) * 64}" y1="${100 + Math.sin(a) * 64}" x2="${100 + Math.cos(a) * 56}" y2="${100 + Math.sin(a) * 56}" stroke="#fff" stroke-width="2" opacity=".7"/>`; }).join('')}
   <line class="needle" x1="100" y1="100" x2="100" y2="34" stroke="#ffd24a" stroke-width="3" stroke-linecap="round"/>
   <circle cx="100" cy="100" r="6" fill="#ffd24a"/></svg>
   <div class="num"><b>0</b><span>km/h</span></div><div class="gear">1</div><div class="dmg"><i></i></div>`;
-(document.querySelector('#stage') || document.body).append(speedo);
+// (the same dial for every vehicle, bikes and scooters too: top left, where the bike's speed readout was)
+{ const tl = document.querySelector('#hud .tl'); if (tl) tl.prepend(speedo); else (document.querySelector('#stage') || document.body).append(speedo); }
 { const st = document.createElement('style'); st.textContent = `
-  #speedo { position: absolute; right: 18px; bottom: 18px; z-index: 6; width: 190px; height: 190px; pointer-events: none; color: #fff; font-family: system-ui, sans-serif; filter: drop-shadow(0 2px 6px rgba(0,0,0,.6)); }
+  #speedo { position: relative; z-index: 6; width: 190px; height: 190px; margin: -18px 0 -22px -14px; pointer-events: none; color: #fff; font-family: system-ui, sans-serif; filter: drop-shadow(0 2px 6px rgba(0,0,0,.6)); }
+  #hud .tl .speed, #hud #rpmBar { display: none !important; }
+  @media (max-width: 640px) { #speedo { width: 140px; height: 140px; margin: -14px 0 -16px -10px; } #speedo .num { transform: scale(.74); transform-origin: 50% 0; top: 80px; } #speedo .gear { top: 44px; } #speedo .dmg { left: 40px; right: 40px; bottom: 10px; } }
+  #speedo .dmg.off { visibility: hidden; }
   #speedo[hidden] { display: none; } #speedo svg { position: absolute; inset: 0; width: 100%; height: 100%; }
   #speedo .num { position: absolute; left: 0; right: 0; top: 108px; text-align: center; } #speedo .num b { display: block; font: 800 34px/1 system-ui, sans-serif; font-variant-numeric: tabular-nums; } #speedo .num span { font-size: 11px; opacity: .7; letter-spacing: .15em; }
   #speedo .gear { position: absolute; left: 50%; top: 62px; transform: translateX(-50%); font: 800 18px/1 system-ui, sans-serif; color: #ffd24a; }
   #speedo .dmg { position: absolute; left: 55px; right: 55px; bottom: 14px; height: 5px; background: rgba(255,255,255,.18); border-radius: 3px; overflow: hidden; } #speedo .dmg i { display: block; height: 100%; background: #3dff8a; }`;
   document.head.appendChild(st); }
 const speedoEls = { rev: speedo.querySelector('.rev'), needle: speedo.querySelector('.needle'), num: speedo.querySelector('.num b'), gear: speedo.querySelector('.gear'), dmg: speedo.querySelector('.dmg i') };
-function updateSpeedo() {
-  const kmh = Math.abs(DRIVE.v) * 3.6, E = speedoEls;
+// the dial: speed against the vehicle's top of scale, the rev arc (0..1), the gear, and a damage bar (hp, or null for none)
+function setSpeedo(kmh, max, rev, red, gear, hp) {
+  const E = speedoEls;
   E.num.textContent = Math.round(kmh);
-  E.needle.setAttribute('transform', `rotate(${-135 + Math.min(1, kmh / 240) * 270} 100 100)`);
-  E.rev.setAttribute('stroke-dasharray', `${Math.min(100, DRIVE.rpm / 7000 * 100).toFixed(1)} 100`);
-  E.rev.setAttribute('stroke', DRIVE.rpm > 6000 ? '#ff4a3d' : '#ff3d7f');
-  E.gear.textContent = DRIVE.hp <= 0 ? '—' : DRIVE.gear < 0 ? 'R' : Math.abs(DRIVE.v) < 0.3 && DRIVE.thr < 0.1 ? 'N' : DRIVE.gear;
-  const h = Math.max(0, DRIVE.hp); E.dmg.style.width = h + '%'; E.dmg.style.background = h > 60 ? '#3dff8a' : h > 30 ? '#ffd24a' : '#ff4a3d';
+  E.needle.setAttribute('transform', `rotate(${-135 + Math.min(1, kmh / max) * 270} 100 100)`);
+  E.rev.setAttribute('stroke-dasharray', `${clamp(rev * 100, 0, 100).toFixed(1)} 100`);
+  E.rev.setAttribute('stroke', red ? '#ff4a3d' : '#ff3d7f');
+  E.gear.textContent = gear;
+  E.dmg.parentNode.classList.toggle('off', hp == null);
+  if (hp != null) { const h = Math.max(0, hp); E.dmg.style.width = h + '%'; E.dmg.style.background = h > 60 ? '#3dff8a' : h > 30 ? '#ffd24a' : '#ff4a3d'; }
+}
+function updateSpeedo() {
+  setSpeedo(Math.abs(DRIVE.v) * 3.6, 240, DRIVE.rpm / 7000, DRIVE.rpm > 6000, DRIVE.hp <= 0 ? '—' : DRIVE.gear < 0 ? 'R' : Math.abs(DRIVE.v) < 0.3 && DRIVE.thr < 0.1 ? 'N' : DRIVE.gear, DRIVE.hp);
+}
+// on the bike (or a scooter): the same dial, scaled to the bike's top speed; petrol bikes show revs and gear, electric
+// ones the throttle
+function updateBikeSpeedo(B) {
+  const gas = B.type === 'gas', max = Math.max(60, Math.ceil(B.vmax * 3.6 * 1.15 / 20) * 20);
+  setSpeedo(Math.abs(S.v) * 3.6, max, gas ? S.rpm / B.engine.redline : S.thr, gas && S.rpm > B.engine.redline * 0.92, gas ? (S.v < 0.3 && S.thr < 0.05 ? 'N' : String(S.gear)) : 'E', null);
 }
 // ---------------------------------------------------------------- bikes and scooters parked on the street
 // A few rideables stand on the sidewalks round you while you're on foot. F next to one takes it; your own bike is left

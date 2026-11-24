@@ -421,6 +421,9 @@ function setupMapMaterials() {
     : new THREE.MeshStandardMaterial({ map: TEX.sidewalk_c || null, vertexColors: true, side: THREE.DoubleSide, roughness: 0.85, metalness: 0 });
   MM.mark = new THREE.MeshLambertMaterial({ vertexColors: true, emissive: '#222222' });
   MM.water = new THREE.MeshStandardMaterial({ color: C.land.water, roughness: 0.12, metalness: 0.25, transparent: true, opacity: 0.93 });
+  // pitched house roofs: real roof tiles (tinted per house: slate grey and brown, terracotta in the sunny cities)
+  MM.tiles = low ? new THREE.MeshLambertMaterial({ map: TEX.rooftiles_c || null, vertexColors: true, side: THREE.DoubleSide })
+    : new THREE.MeshStandardMaterial({ map: TEX.rooftiles_c || null, normalMap: TEX.rooftiles_n || null, vertexColors: true, side: THREE.DoubleSide, roughness: 0.85, metalness: 0, envMapIntensity: 0.5 });
   MM.roof = low ? new THREE.MeshLambertMaterial({ map: TEX.roofgravel_c || null, vertexColors: true, side: THREE.DoubleSide })
     : new THREE.MeshStandardMaterial({ map: TEX.roofgravel_c || null, normalMap: TEX.roofgravel_n || null, vertexColors: true, side: THREE.DoubleSide, roughness: 0.92, metalness: 0.02, envMapIntensity: 0.5 });
   // facades: real photographed towers, and composed photo walls with windows for everything lower (world.js)
@@ -451,6 +454,9 @@ function setupMapMaterials() {
   MM.conifer = foliageMaterial(MM.needleTex);
   MM.frond = foliageMaterial(MM.frondTex);
   for (const k of ['leaf', 'conifer', 'frond']) MM[k + 'Depth'] = MM[k].userData.depth;
+  // front yards: hedges (leafy core plus the leaf cards), stucco garden walls
+  MM.hedge = low ? new THREE.MeshLambertMaterial({ map: hedgeTexture(MM.leafTex) }) : new THREE.MeshStandardMaterial({ map: hedgeTexture(MM.leafTex), roughness: 0.9, metalness: 0, envMapIntensity: 0.5 });
+  MM.gardenWall = low ? new THREE.MeshLambertMaterial({ map: TEX.plaster_c || null }) : new THREE.MeshStandardMaterial({ map: TEX.plaster_c || null, normalMap: TEX.plaster_n || null, roughness: 0.92, metalness: 0 });
   MM.sigBox = new THREE.MeshLambertMaterial({ color: '#1d1f22' });
   MM.sigOff = new THREE.MeshLambertMaterial({ color: '#262626' });
   MM.sigR = new THREE.MeshBasicMaterial({ color: '#ff2a1a' }); MM.sigY = new THREE.MeshBasicMaterial({ color: '#ffb000' }); MM.sigG = new THREE.MeshBasicMaterial({ color: '#2dff8a' });
@@ -817,7 +823,7 @@ function buildBase(t) {
 
   // Buildings. Style comes from the mapped material or the building type; colour from OSM where it's mapped.
   const STY = Object.keys(FACADE_SIZE);
-  const W = Object.fromEntries(STY.map((st) => [st, new GeoBuf(true, true)])), roof = new GeoBuf(true, true);
+  const W = Object.fromEntries(STY.map((st) => [st, new GeoBuf(true, true)])), roof = new GeoBuf(true, true), tiles = new GeoBuf(true, true);
   const signs = [], labels = [], domes = [], shopSigns = [];
   const neon = C.neon && MM.neon ? new GeoBuf(true) : null;
   // real businesses (shop / cafe / restaurant nodes) matched to the building they're in
@@ -847,10 +853,12 @@ function buildBase(t) {
     for (let i = o0; i < o1; i++) { const dx = cx - m.bx[i], dz = cz - m.bz[i], L = Math.hypot(dx, dz) || 1; bxs.push(m.bx[i] + dx / L * ins); bzs.push(m.bz[i] + dz / L * ins); }
     const style = buildingStyle(b, h), col = buildingColor(b, style);
     const [texW, texH] = FACADE_SIZE[style];
-    const gable = style === 'house' && n === 4 && h < 11 && absA < 400;
+    // houses get a pitched roof: a gable over a plain four-cornered house (most of them), a hip roof otherwise
+    const pitched = style === 'house' && n >= 4 && n <= 12 && h < 11 && absA < 400;
+    const gable = pitched && n === 4 && hash2(b, 71) < 0.65;
     const colDark = col.clone().multiplyScalar(0.55), colMid = col.clone().multiplyScalar(0.8), colPar = col.clone().multiplyScalar(0.78);
-    const parapet = !gable && !(fl & 2) && h > 7 && style !== 'house';
-    const wallTop = gable ? h - 2.2 : h;
+    const parapet = !pitched && !(fl & 2) && h > 7 && style !== 'house';
+    const wallTop = pitched ? h - 2.2 : h;
     const shop = !(fl & 16) && ((fl & 1) || (shopsIn.has(b) && style !== 'house' && h >= 5) || ((kind === 0 || kind === 2 || kind === 3) && h >= 6.5 && style !== 'industrial' && style !== 'house' && absA < 6000 && hash2(b, 31) < 0.55));
     const band = shop ? 4.2 : -0.3;
     const spal = C.walls.shop || WALL_DEFAULTS.shop, shopCol = new THREE.Color(spal[Math.floor(hash2(b, 33) * spal.length)]), shopDark = shopCol.clone().multiplyScalar(0.7);
@@ -869,7 +877,7 @@ function buildBase(t) {
       per += L; if (L > longest) { longest = L; li = k; }
     }
     // Vegas: neon bands round the crown of the resort towers and the casino roofs, light strips up tower corners
-    if (neon && !gable && style !== 'house' && (h >= 30 || (absA > 2500 && h >= 9))) {
+    if (neon && !pitched && style !== 'house' && (h >= 30 || (absA > 2500 && h >= 9))) {
       const nc = NEON_COL[Math.floor(hash2(b, 61) * NEON_COL.length)], tall = h >= 60;
       for (let k = 0; k < n; k++) {
         const k2 = (k + 1) % n, L = Math.hypot(bxs[k2] - bxs[k], bzs[k2] - bzs[k]); if (L < 2) continue;
@@ -881,22 +889,39 @@ function buildBase(t) {
         if (tall && L > 6 && n <= 12) { const w = 0.7 / L; neon.wall(x0, z0, x0 + (x1 - x0) * w, z0 + (z1 - z0) * w, 6, h - 4.2, nx, nz, nc); }
       }
     }
-    const rc = new THREE.Color(style === 'house' ?(hash2(b, 9) < 0.5 ? '#6a6a70' : '#8a6a5c') : style === 'industrial' ? '#c8ccd0' : '#a8aaac').multiplyScalar(0.8 + hash2(b, 4) * 0.35);
-    if (gable) {
-      const P = [0, 1, 2, 3].map((k) => [bxs[k], bzs[k]]);
-      const l01 = Math.hypot(P[1][0] - P[0][0], P[1][1] - P[0][1]), l12 = Math.hypot(P[2][0] - P[1][0], P[2][1] - P[1][1]);
-      const Q = l01 >= l12 ? P : [P[1], P[2], P[3], P[0]];
-      const r0 = [(Q[0][0] + Q[3][0]) / 2, (Q[0][1] + Q[3][1]) / 2], r1 = [(Q[1][0] + Q[2][0]) / 2, (Q[1][1] + Q[2][1]) / 2];
-      const tri = (a, bb, c) => { for (const q of [a, bb, c]) roof.v(q[0], q[1], q[2], 0, 1, 0, rc, q[0] / 4, q[2] / 4 + q[1] / 4); };
-      const yt = wallTop, yr = h;
-      const A = (p) => [p[0], yt, p[1]], Rr = (p) => [p[0], yr, p[1]];
-      tri(A(Q[0]), A(Q[1]), Rr(r1)); tri(A(Q[0]), Rr(r1), Rr(r0));
-      tri(A(Q[2]), A(Q[3]), Rr(r0)); tri(A(Q[2]), Rr(r0), Rr(r1));
-      const gw = W[style];
-      for (const [p, q, r] of [[Q[3], Q[0], r0], [Q[1], Q[2], r1]]) {
-        const ex = q[0] - p[0], ez = q[1] - p[1], el = Math.hypot(ex, ez) || 1, gnx = ez / el, gnz = -ex / el;
-        gw.v(p[0], yt, p[1], gnx, 0, gnz, col, 0, 0); gw.v(q[0], yt, q[1], gnx, 0, gnz, col, 0.01, 0); gw.v(r[0], yr, r[1], gnx, 0, gnz, col, 0.005, 0.01);
+    const rc = new THREE.Color(style === 'house' ? (C.trees === 'palms' ? (hash2(b, 9) < 0.6 ? '#d0785a' : '#9a7a66') : (hash2(b, 9) < 0.5 ? '#70727a' : '#8a6a5c')) : style === 'industrial' ? '#c8ccd0' : '#a8aaac').multiplyScalar(0.8 + hash2(b, 4) * 0.35);
+    if (pitched) {
+      // the roof over the footprint's box along its longest wall, with eaves overhanging 40 cm all round; tiled, lit by
+      // its real slope (so the sunny side is brighter than the shady one)
+      const ex = bxs[(li + 1) % n] - bxs[li], ez = bzs[(li + 1) % n] - bzs[li], el = Math.hypot(ex, ez) || 1, ux = ex / el, uz = ez / el, vx = -uz, vz = ux;
+      let u0 = 1e9, u1 = -1e9, v0 = 1e9, v1 = -1e9;
+      for (let k = 0; k < n; k++) { const u = bxs[k] * ux + bzs[k] * uz, v = bxs[k] * vx + bzs[k] * vz; u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v); }
+      const ov = 0.4, wu0 = u0, wu1 = u1, wv0 = v0, wv1 = v1, vm = (v0 + v1) / 2, half = (v1 - v0) / 2, rise = h - wallTop;
+      u0 -= ov; u1 += ov; v0 -= ov; v1 += ov;
+      const yE = wallTop - rise * ov / Math.max(0.5, half);                               // the eave, a little lower than the wall top
+      let ua = u0, ub = u1;
+      if (!gable) { ua = u0 + half + ov; ub = u1 - half - ov; if (ub < ua) ua = ub = (u0 + u1) / 2; }
+      const P = (u, v, y) => [u * ux + v * vx, y, u * uz + v * vz];
+      const face = (pts) => {
+        const [a, bb, c] = pts, n1 = [bb[0] - a[0], bb[1] - a[1], bb[2] - a[2]], n2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+        let nx = n1[1] * n2[2] - n1[2] * n2[1], ny = n1[2] * n2[0] - n1[0] * n2[2], nz = n1[0] * n2[1] - n1[1] * n2[0]; const L = Math.hypot(nx, ny, nz) || 1;
+        if (ny < 0) { nx = -nx; ny = -ny; nz = -nz; }
+        const tris = pts.length === 4 ? [pts[0], pts[1], pts[2], pts[0], pts[2], pts[3]] : pts;
+        for (const q of tris) tiles.v(q[0], q[1], q[2], nx / L, ny / L, nz / L, rc, (q[0] * ux + q[2] * uz) / 2.2, (Math.abs(q[0] * vx + q[2] * vz - vm) + (h - q[1])) / 2.2);
+      };
+      face([P(u0, v0, yE), P(u1, v0, yE), P(ub, vm, h), P(ua, vm, h)]);
+      face([P(u1, v1, yE), P(u0, v1, yE), P(ua, vm, h), P(ub, vm, h)]);
+      if (!gable) { face([P(u0, v1, yE), P(u0, v0, yE), P(ua, vm, h)]); face([P(u1, v0, yE), P(u1, v1, yE), P(ub, vm, h)]); }
+      else {
+        // the gable ends: wall triangles up to the ridge, on the end walls
+        const gw = W[style];
+        for (const [uE, sgnE] of [[wu0, -1], [wu1, 1]]) {
+          const a = P(uE, wv0, wallTop), c = P(uE, wv1, wallTop), r = P(uE, vm, h), gnx = ux * sgnE, gnz = uz * sgnE;
+          for (const q of [a, c, r]) gw.v(q[0], q[1], q[2], gnx, 0, gnz, col, 0.003, 0.003);
+        }
       }
+      // fascia boards under the eaves along the long sides
+      for (const vv of [v0, v1]) { const a = P(u0, vv, yE), c = P(u1, vv, yE); roof.wall(a[0], a[2], c[0], c[2], yE - 0.18, yE, vx * (vv > vm ? 1 : -1), vz * (vv > vm ? 1 : -1), rc.clone().multiplyScalar(0.5), 0, 0.01, 0, 0.01); }
     } else {
       v2.length = 0;
       for (let k = 0; k < n; k++) v2.push(new THREE.Vector2(bxs[k], bzs[k]));
@@ -953,6 +978,7 @@ function buildBase(t) {
   }
   for (const st of STY) if (!W[st].empty) addMesh(W[st].build(), MM.walls[st], { cast: true });
   if (!roof.empty) addMesh(roof.build(), MM.roof, { cast: true });
+  if (!tiles.empty) addMesh(tiles.build(), MM.tiles, { cast: true });
   if (neon && !neon.empty) addMesh(neon.build(), MM.neon);
   // shop and neon signs are one draw each: only shown on the tiles near you (updateTiles), unreadable further out
   const near = new THREE.Group(); g.add(near);
@@ -1118,6 +1144,7 @@ function dirFromNode(n, adjEntry) {
 function buildDetail(t) {
   const m = MAP, g = new THREE.Group(), disp = [], X0 = t.i * TILE, Z0 = t.j * TILE, obs = [], signNames = [], signals = [];
   const white = new THREE.Color('#e9e6df'), yellow = new THREE.Color('#e6b928');
+  const wearPatch = new THREE.Color('#3a3936'), wearCrack = new THREE.Color('#151516'), wearMetal = new THREE.Color('#4a4842');
   const mk = new GeoBuf(true);
   const segs = m.tSeg.get(t.key) || [];
   // strip along segment i between distances sa..sb (edge distances) at lateral offset o, width w
@@ -1142,8 +1169,25 @@ function buildDetail(t) {
     } else {
       const residential = cls === 6 || (cls === 5 && !m.eLanes[e]);
       if (!residential) { strip(i, lo, hi, -0.12, 0.11, yellow, y); strip(i, lo, hi, 0.12, 0.11, yellow, y); }
+      // a solid white edge line in from each curb (the parking strip outside it), on anything wider than a lane each way
       const per = Math.max(1, Math.floor(laneTot / 2));
+      const ew = m.eHW[e] - (residential ? 2.0 : 2.4);
+      if (ew > lw * per - 0.2 && ew > 2.6) { strip(i, lo, hi, ew, 0.12, white, y); strip(i, lo, hi, -ew, 0.12, white, y); }
       for (let k = 1; k < per; k++) { dashes(k * lw); dashes(-k * lw); }
+    }
+    // wear: darker repaired patches, sealed cracks (thin black lines), manhole covers; a little under the paint
+    if (R.hwy || quality === 'low') continue;
+    const hwR = m.eHW[e] - 0.4, yw = y - 0.005;
+    for (let s = Math.ceil(lo / 7) * 7; s < hi; s += 7) {
+      const h1 = hash2(e * 7 + Math.round(s), 3, 41), h2 = hash2(e * 7 + Math.round(s), 5, 42), h3 = hash2(e * 7 + Math.round(s), 7, 43);
+      if (h1 < 0.09) { const len = 1.2 + h2 * 3, w = 0.8 + h3 * 1.8, o = (h2 - 0.5) * 2 * Math.max(0, hwR - w / 2); strip(i, s, Math.min(hi, s + len), o, w, wearPatch, yw); }
+      else if (h1 < 0.36) { const len = 2 + h3 * 5, o = (h2 - 0.5) * 2 * hwR; strip(i, s, Math.min(hi, s + len * 0.5), o, 0.035, wearCrack, yw); strip(i, s + len * 0.5, Math.min(hi, s + len), o + (h3 - 0.5) * 0.25, 0.035, wearCrack, yw); }
+      else if (h1 > 0.93) {
+        // a manhole cover in a lane: a ring of quads round the centre
+        const o = (h2 < 0.5 ? -1 : 1) * lw * 0.5, s0 = m.pc[i], L = m.pc[i + 1] - s0 || 1e-6, f = clamp((s + 1 - s0) / L, 0, 1);
+        const px = m.px[i] + (m.px[i + 1] - m.px[i]) * f + m.mx[i] * o, pz = m.pz[i] + (m.pz[i + 1] - m.pz[i]) * f + m.mz[i] * o;
+        for (let a = 0; a < 8; a++) { const a0 = a / 8 * TAU, a1 = (a + 1) / 8 * TAU, r = 0.36; mk.flat(px, pz, px, pz, px + Math.cos(a1) * r, pz + Math.sin(a1) * r, px + Math.cos(a0) * r, pz + Math.sin(a0) * r, yw + 0.002, wearMetal); }
+      }
     }
   }
   // crosswalks at signalised junctions
@@ -1246,6 +1290,77 @@ function buildDetail(t) {
         plant(x, z, 'street', 6);
       }
     }
+  }
+  // Leafy streets of houses, every city: trees in most front yards and some along the curb (palms mixed in where it's
+  // a palm city), only where there's a house or apartment building behind
+  if (quality !== 'low') for (const i of segs) {
+    const e = m.pE[i], cls = m.eCls[e];
+    if (cls < 5 || cls > 7 || (m.eFlag[e] & (F_BRIDGE | F_TUNNEL))) continue;
+    const hw = m.eHW[e], segL = m.pc[i + 1] - m.pc[i] || 1;
+    for (let s = Math.ceil(m.pc[i] / 9) * 9; s < m.pc[i + 1]; s += 9) {
+      if (s < m.nodeHW[m.eA[e]] + 7 || s > m.eLen[e] - m.nodeHW[m.eB[e]] - 7) continue;
+      const f = (s - m.pc[i]) / segL, nx = m.mx[i] + (m.mx[i + 1] - m.mx[i]) * f, nz = m.mz[i] + (m.mz[i + 1] - m.mz[i]) * f;
+      const cx = m.px[i] + (m.px[i + 1] - m.px[i]) * f, cz = m.pz[i] + (m.pz[i + 1] - m.pz[i]) * f;
+      for (const side of [-1, 1]) {
+        const k = hash2(e * 13 + Math.round(s), side + 9, 31); if (k > 0.6) continue;
+        const off = k < 0.18 ? hw + 1.5 : hw + 5.2 + (k - 0.18) * 6, x = cx + nx * off * side, z = cz + nz * off * side;
+        if (!offRoad(x, z, 0.9) || buildingAt(x, z, 2.0) >= 0) continue;
+        const bi = buildingAt(x + nx * side * 6, z + nz * side * 6, 7);
+        if (bi < 0 || (m.bKind[bi] !== 1 && m.bKind[bi] !== 2)) continue;
+        plant(x, z, off > hw + 3 ? 'park' : 'street', 8);
+      }
+    }
+  }
+  // Front yards along streets of houses and apartments: each lot (12-20 m, a driveway gap at its start) gets a hedge,
+  // a stucco garden wall with pillars, or an open lawn with a few bushes, just behind the sidewalk
+  const yard = { hedge: [], leaf: [], wall: [], pillar: [], bush: [] };
+  if (quality !== 'low') for (const i of segs) {
+    const e = m.pE[i], cls = m.eCls[e];
+    if (cls < 4 || cls > 7 || (m.eFlag[e] & (F_BRIDGE | F_TUNNEL))) continue;
+    const hw = m.eHW[e], dx = m.px[i + 1] - m.px[i], dz = m.pz[i + 1] - m.pz[i], segL = Math.hypot(dx, dz) || 1, rot = Math.atan2(dx, dz);
+    for (const side of [-1, 1]) {
+      const lotL = 12 + hash2(e, side + 3, 21) * 8, phase = hash2(e, side + 5, 22) * lotL, off = hw + 3.15;
+      for (let s = Math.ceil(m.pc[i] / 2) * 2 + 1; s < m.pc[i + 1]; s += 2) {
+        if (s < m.nodeHW[m.eA[e]] + 6 || s > m.eLen[e] - m.nodeHW[m.eB[e]] - 6) continue;
+        const ls = (s + phase) % lotL, lot = Math.floor((s + phase) / lotL);
+        if (ls < 3) continue;                                                  // the driveway
+        const f = (s - m.pc[i]) / segL, nx = m.mx[i] + (m.mx[i + 1] - m.mx[i]) * f, nz = m.mz[i] + (m.mz[i + 1] - m.mz[i]) * f;
+        const cx = m.px[i] + dx * f, cz = m.pz[i] + dz * f, x = cx + nx * off * side, z = cz + nz * off * side;
+        if (buildingAt(x, z, 0.7) >= 0 || !offRoad(x, z, 2.7)) continue;
+        // only in front of homes: a house or apartment building just behind the line
+        const bi = buildingAt(x + nx * side * 7, z + nz * side * 7, 5);
+        if (bi < 0 || (m.bKind[bi] !== 1 && m.bKind[bi] !== 2)) continue;
+        const kind = hash2(e * 31 + lot, side + 7, 23), y0 = CURB;
+        if (kind < 0.5) {
+          const h = 0.9 + hash2(e * 31 + lot, side, 24) * 0.8;
+          yard.hedge.push([x, y0, z, rot, 2.02, h, 0.9]); yard.leaf.push([x, y0, z, rot, 2.02, h, 0.9]);
+          obs.push([x, z, 0.6, 'Hit a hedge']);
+        } else if (kind < (C.trees === 'palms' ? 0.78 : 0.62)) {
+          const h = 0.85 + hash2(e * 31 + lot, side, 25) * 0.5;
+          yard.wall.push([x, y0, z, rot, 2.0, h, 0.24, lot]);
+          if (ls < 5) yard.pillar.push([x - (dx / segL) * 0.9, y0, z - (dz / segL) * 0.9, rot, 1, h + 0.25, 1, lot]);
+          obs.push([x, z, 0.45, 'Hit a wall']);
+        } else if (hash2(Math.round(x * 3), Math.round(z * 3), 26) < 0.3) {
+          const sc = 0.22 + hash2(Math.round(x), Math.round(z), 27) * 0.14;
+          yard.bush.push([x, y0 - (5 - 2.1) * sc + 0.05, z, hash2(Math.round(x), Math.round(z), 28) * TAU, sc, sc, sc]);
+        }
+      }
+    }
+  }
+  {
+    const wallPal = (C.walls && C.walls.house) || ['#e8e0d0'];
+    const put = (geo, mat, list, cast, colOf) => {
+      if (!list.length) return;
+      const im = new THREE.InstancedMesh(geo, mat, list.length), q = new THREE.Quaternion(), m4 = new THREE.Matrix4(), p = new THREE.Vector3(), sc = new THREE.Vector3(), col = new THREE.Color();
+      list.forEach((o, k) => { q.setFromAxisAngle(Yv, o[3]); m4.compose(p.set(o[0], o[1], o[2]), q, sc.set(o[6], o[5], o[4])); im.setMatrixAt(k, m4); if (colOf) im.setColorAt(k, col.set(colOf(o))); });
+      im.castShadow = cast; im.receiveShadow = true; if (mat.userData.depth) im.customDepthMaterial = mat.userData.depth; g.add(im); disp.push(im);
+    };
+    // (the module runs along the street: its length is the z scale once turned to the street's heading)
+    put(hedgeCoreGeo, MM.hedge, yard.hedge.map((o) => [o[0], o[1], o[2], o[3], o[4] * 0.96, o[5] * 0.95, o[6] * 0.9]), true, (o) => ['#ffffff', '#e8f0d8', '#d8e4c4', '#f0f0dc'][Math.floor(Math.abs(o[0] * 7 + o[2] * 3)) % 4]);
+    put(hedgeLeafGeo, MM.leaf, yard.leaf, true, () => '#d8e8c4');
+    put(gardenWallGeo, MM.gardenWall, yard.wall, true, (o) => wallPal[o[7] % wallPal.length]);
+    put(gardenPillarGeo, MM.gardenWall, yard.pillar, true, (o) => wallPal[o[7] % wallPal.length]);
+    put(leafCrownGeo, MM.leaf, yard.bush, true, () => '#e0ecd0');
   }
   const inst = (geo, mat, list, cast, palette) => {
     if (!list.length) return;

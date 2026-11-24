@@ -12,16 +12,26 @@ function fcopGround(x, z) {
   const q = roadQuery(x, z, 14);
   return q.in ? roadY(RC[MAP.eCls[q.e]].rank) : (q.e >= 0 && q.d < q.hw + 2.6 && RC[MAP.eCls[q.e]].walk) ? CURB : 0;
 }
+// Officers only ever come out of a police car: a chasing car pulls up near you, stops (lights still going), the doors
+// thump and the driver and partner step out beside it (one off a police bike). No car close yet: nobody on foot yet.
 function spawnFootCop() {
-  // out of a chasing police car nearby, or round a corner
-  let x, z;
-  const car = units.filter((u) => u.on && !u.player && !u.parked && u.kind !== 'car' && Math.hypot(u.x - FOOT.x, u.z - FOOT.z) < 70).sort((a, b) => Math.hypot(a.x - FOOT.x, a.z - FOOT.z) - Math.hypot(b.x - FOOT.x, b.z - FOOT.z))[0];
-  if (car && Math.random() < 0.7) { const lx = Math.cos(car.yaw), lz = -Math.sin(car.yaw), s = Math.random() < 0.5 ? 1 : -1; x = car.x + lx * 1.6 * s; z = car.z + lz * 1.6 * s; car.v *= 0.2; }
-  else {
-    for (let k = 0; k < 10; k++) { const a = Math.random() * TAU, d = 28 + Math.random() * 18; x = FOOT.x + Math.sin(a) * d; z = FOOT.z + Math.cos(a) * d; if (buildingAt(x, z, 0.5) < 0) break; x = null; }
-  }
-  if (x == null || buildingAt(x, z, 0.3) >= 0) return;
-  return makeFootCop(makeFigure(copLook()), x, z, fcopGround(x, z), false);
+  const now = performance.now();
+  const car = units.filter((u) => u.on && !u.player && !u.parked && u.kind !== 'car' && u.chasing && u.v < 7 && !(now - (u.droppedAt || -1e9) < 60000) && Math.hypot(u.x - FOOT.x, u.z - FOOT.z) < 40)
+    .sort((a, b) => Math.hypot(a.x - FOOT.x, a.z - FOOT.z) - Math.hypot(b.x - FOOT.x, b.z - FOOT.z))[0];
+  if (!car) return null;
+  car.droppedAt = now; car.parkT = 30; car.v = 0;                      // (parked where it stopped, for a while)
+  const fx = Math.sin(car.yaw), fz = Math.cos(car.yaw), rx = Math.cos(car.yaw), rz = -Math.sin(car.yaw);
+  const doors = car.kind === 'moto' ? [0.9] : [-1.3, 1.3];
+  doors.forEach((s, i) => setTimeout(() => {
+    if (!car.on || !FOOT.on) return;
+    let x = car.x + rx * s + fx * 0.4, z = car.z + rz * s + fz * 0.4;
+    if (buildingAt(x, z, 0.3) >= 0) { x = car.x - rx * s + fx * (i ? -1.2 : 0.4); z = car.z - rz * s + fz * (i ? -1.2 : 0.4); }
+    if (buildingAt(x, z, 0.3) >= 0) return;
+    sfx.thump && sfx.thump(0.35);                                        // the door
+    const p = makeFootCop(makeFigure(copLook()), x, z, fcopGround(x, z), false);
+    if (p) { p.exitT = 0.7; p.yaw = Math.atan2(rx * Math.sign(s), rz * Math.sign(s)); p.g.rotation.y = p.yaw; if (!i) say(p, pick(Math.random, FCOP_LINES.arrest), false); }
+  }, 250 + i * 650));
+  return car;
 }
 function makeFootCop(fig, x, z, y, inRoom) {
   if (!fig) return null;
@@ -84,7 +94,7 @@ function updateFootCops(d) {
   // more officers the hotter you are
   const want = onFoot && !FOOT.car && st >= 1 && FOOT.downT <= 0 ? Math.min(6, 1 + st) : 0;
   fcopSpawnT -= d;
-  if (FCOPS.filter((p) => !p.dead && !p.inRoom).length < want && fcopSpawnT <= 0) { fcopSpawnT = 2.5; spawnFootCop(); }
+  if (FCOPS.filter((p) => !p.dead && !p.inRoom).length < want && fcopSpawnT <= 0) fcopSpawnT = spawnFootCop() ? 2.5 : 0.5;
   if (FOOT.on && FOOT.store) raidRoom(d);
   const inside = !!(FOOT.on && FOOT.store);
   // where they head: you; or, while you're inside somewhere, the officers outside cover the door
@@ -105,6 +115,8 @@ function updateFootCops(d) {
     if (p.dead) { p.deadT += d; m.mixer.update(d); if (p.deadT > 40 || (!p.inRoom && dist > 140)) removeFootCop(p); continue; }
     if (!p.inRoom && (dist > 160 || (!FOOT.on && dist > 70))) { removeFootCop(p); continue; }
     const busy = m.cur && /Hit|Shoot/.test(m.cur) && m.actions[m.cur].isRunning();
+    // just out of the car: a moment stepping away from the door before they come for you
+    if (p.exitT > 0) { p.exitT -= d; const a = p.yaw; p.x += Math.sin(a) * 1.2 * d; p.z += Math.cos(a) * 1.2 * d; personPlay(m, 'Walk_Loop', 0.2); p.g.position.set(p.x, p.g.position.y, p.z); m.mixer.update(d); continue; }
     let speed = 0, face = Math.atan2(ptx - p.x, ptz - p.z), anim = 'Idle_Loop';
     if (guarding) {
       // waiting outside, weapons on the door

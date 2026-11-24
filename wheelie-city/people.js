@@ -259,6 +259,14 @@ function updateRiderModel(r) {
   // first person: no head in front of the camera
   B.head.scale.setScalar(r.head.visible ? 0.9 : 0.001);
 }
+// a weapon held in a hand: it moves with the hand but points the way the person faces (tilted by pitch). The hand
+// bone's own axes swing about with every animation, so a fixed rotation on the bone leaves the gun sideways.
+const _heldQ = new THREE.Quaternion(), _heldW = new THREE.Quaternion(), _heldE = new THREE.Euler();
+function aimHeld(holder, hand, yaw, pitch) {
+  hand.getWorldQuaternion(_heldQ);
+  _heldW.setFromEuler(_heldE.set(pitch, yaw, 0, 'YXZ'));
+  holder.quaternion.copy(_heldQ.invert()).multiply(_heldW);
+}
 function personPlay(m, name, fade = 0.3, speed = 1) {
   const a = m.actions[name]; if (!a) return;
   a.timeScale = speed;
@@ -266,5 +274,9 @@ function personPlay(m, name, fade = 0.3, speed = 1) {
   const prev = m.cur ? m.actions[m.cur] : null;
   a.reset().play();
   if (prev) a.crossFadeFrom(prev, fade, false);
+  // (no current one known, e.g. dying or a hold-up: fade out whatever was playing, or it keeps its full weight and
+  // the two poses blend: a dead body half standing, floating over the ground)
+  else for (const k in m.actions) { const o = m.actions[k]; if (o !== a && o.isRunning() && o.getEffectiveWeight() > 0) o.fadeOut(fade); }
+  a.setEffectiveWeight(1); if (!prev) a.fadeIn(fade);
   m.cur = name;
 }

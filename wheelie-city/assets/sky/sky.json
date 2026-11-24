@@ -110,5 +110,47 @@
    0.7791,
    0.8278
   ]
+ },
+ "day_la": {
+  "sun": [
+   0.6077,
+   0.6578,
+   0.445
+  ],
+  "peak": 18.7,
+  "src": "qwantani_afternoon_puresky",
+  "horizon": [
+   0.872,
+   0.909,
+   0.9395
+  ]
+ },
+ "day_vegas": {
+  "sun": [
+   0.5233,
+   0.7612,
+   0.3831
+  ],
+  "peak": 17.6,
+  "src": "qwantani_noon_puresky",
+  "horizon": [
+   0.8404,
+   0.8848,
+   0.9232
+  ]
+ },
+ "day_nyc": {
+  "sun": [
+   0.5878,
+   0.6851,
+   0.4303
+  ],
+  "peak": 20.1,
+  "src": "kloofendal_43d_clear_puresky",
+  "horizon": [
+   0.8446,
+   0.8918,
+   0.9301
+  ]
  }
 }

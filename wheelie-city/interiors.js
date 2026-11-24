@@ -67,6 +67,8 @@ function ixArmGuard(p) {
   p.model.root.updateMatrixWorld(true);
   const s = 1 / (hand.getWorldScale(new THREE.Vector3()).x || 1); g.scale.setScalar(s); g.position.set(0, 0.08 * s, 0.03 * s); g.rotation.set(Math.PI / 2, 0, 0);
   hand.add(g);
+  // (pointed the way they face each frame, not along the hand bone)
+  s1.onBeforeRender = () => aimHeld(g, hand, p.yaw, 0.15);
 }
 // a table with chairs round it, and maybe people sitting at it
 function ixTable(x, z, seed, opts = {}) {

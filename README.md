@@ -53,6 +53,21 @@ Browser games, published at https://average-alex.github.io/games/
 - **Taller malls.** Malls and big stores get 5–6 m floors instead of 3.2 m, and an outline mapped in parts now takes its biggest part's height (one small canopy had left Metropolis at Metrotown at 5 m).
 - **No more grainy picture.** Film grain, lens fringing and most sharpening are off, and the auto-resolution never drops below 65%.
 - **Car and cop fixes.** Cars now collide with the middle of the bike too, and slow bumps stop you instead of sliding you through. Under 3 stars, cops pace alongside you instead of ramming, and wheelies only get you noticed by a cop within 35 m (with a warning first).
+- **Every shop fitted out for what it sells** (`wheelie-city/shops.js`): grocery/convenience (aisles, drink fridges, slushie machine), tech (TV wall, demo tables of phones), bike shops (bikes on the floor and wall, workbench), bookshops (bookcases, reading chair), pharmacies (white aisles, a pharmacy counter), hardware (tall racking, pegboard, plants) and gift shops. Colours, floor, aisles and fittings vary per shop, the shop's name is over the counter, and what you can pocket depends on the shop.
+- **Weapons point forward** out of your hand (and guards' and police pistols), instead of following the hand bone sideways. The knife is bigger and brighter.
+- **Deaths:** the dying person's previous animation now fades out, so bodies lie flat instead of half standing.
+- **Hitting someone on the bike** throws you off (anything faster than walking pace), and they're hurt and bleeding; a hard hit kills them.
+- **Police arrive by car:** officers on foot only come out of a police car that has pulled up near you (it stops with its lights on, the doors thump, two officers get out).
+- **One speedometer for everything:** the car's dial (speed, revs or throttle, gear) is now top left on bikes, scooters and cars, scaled to each vehicle's top speed; cars also show damage.
+- **The market (T) works from a car.**
+- **SkyTrain robbery:** look at a passenger near your seat and press E; they hand over their wallet or phone and someone calls it in.
+- **Every city in sunny daytime:** LA was golden hour, Vegas night and New York dusk; all five are now clear daytime with a blue sky, the sun 40–50° up, hard shadows and less haze. New Poly Haven skies (CC0): `day_la` (`qwantani_afternoon_puresky`), `day_vegas` (`qwantani_noon_puresky`), `day_nyc` (`kloofendal_43d_clear_puresky`); Vancouver and Miami keep theirs, and Vancouver rains less often. Neutral daytime grades, light concrete sidewalks, grey roads and greener verges everywhere. Vegas signs and neon stay on. `tools/fetch_assets.py skies` now only downloads skies it doesn't have yet (the old `night_vegas`, `dusk_nyc` and `sunset_la` files are still there if a night/dusk option is wanted).
+- **Front yards:** streets of houses and apartments get a hedge, a stucco garden wall with pillars, or an open lawn with bushes in front of each lot (driveway gaps between), just behind the sidewalk. They're solid. Not drawn on Low quality.
+- **New car models** (`vehicles.js` `carGeo`): rounded profiles, sides that tuck in under the sills and narrow at the shoulder, fenders that bulge over the wheels, door seams and chrome handles, a glasshouse with rubber seals, black window frames and B-pillars (windshield and rear window as glass, pillars painted), chrome-surround grilles and lower intakes, mirrors on stalks, headlights and tail lights that wrap round the corners (placed on the actual body surface), amber indicators, a rear light bar, dished alloy wheels with twin spokes and brake discs, black cladding on SUVs and pickups, a bed liner in pickups. Paint is less metallic and more clear-coated.
+- **Leafy residential streets:** trees in most front yards and some along the curb on streets of houses, every city (palms mixed in in LA, Vegas and Miami). Not on Low.
+- **House roofs:** small houses get pitched roofs (gable on plain four-cornered houses, hip roofs otherwise) with 40 cm overhanging eaves and fascia boards, real roof tiles lit by their slope, terracotta in the sunny cities and slate grey or brown elsewhere.
+- **Road wear:** repaired patches, sealed crack lines and manhole covers on ordinary streets (not highways, not on Low).
+- **Road markings:** two-way streets wider than a lane each way get solid white edge lines in from the curb.
 - **Vegas neon.** The resort towers and casino roofs on the Strip now have neon bands round their tops, and the towers have light strips up their corners.
 
 The work from the other Claude window (new street bikes, `transit.js` station walkthroughs, building parts) is included in these changes. A snapshot of it from before this update is kept at git ref `refs/backup/other-session`.
@@ -65,7 +80,7 @@ The work from the other Claude window (new street bikes, `transit.js` station wa
    - I haven't measured the live version under the same conditions yet, so I don't know if that's slower than before.
    - Next: try it on the Chromebook. If it's slow, make Low/Med skip the photo facades and the far skyline.
 3. **Chromebook frame rate.** Draw calls went down, but each pixel costs more (photo materials, sky, half-float post-processing). The governor lowers resolution automatically. It still needs a real Chromebook test.
-4. **Vegas streets at night are still a bit dark.** The towers glow now, but the street level could use brighter casino entrances and light spilling onto the pavement.
+4. **Time of day option.** Every city is daytime now; a menu choice could bring back Vegas at night, NYC at dusk and LA at golden hour (the skies are still in `assets/sky`).
 5. **More landmarks.** Add more to `LANDMARK_SITES` in `landmarks.js` in the same way:
    - LA: Griffith Observatory, the Hollywood sign, the Capitol Records building
    - Miami: Freedom Tower

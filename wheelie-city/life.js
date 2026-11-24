@@ -74,6 +74,7 @@ function buildPeds() {
 }
 const pedEdge = (e) => { const R = RC[MAP.eCls[e]]; return R.walk || R.path; };
 function spawnPed(p) {
+  p.hp = 100; p.bleedT = 0; p.hits = 0;          // (a fresh person each time the slot is reused)
   for (let tries = 0; tries < 10; tries++) {
     const a = Math.random() * TAU, d = 30 + Math.random() * 110, x = S.x + Math.sin(a) * d, z = S.z + Math.cos(a) * d;
     const q = roadQuery(x, z, 30, pedEdge); if (q.e < 0) continue;
@@ -125,12 +126,14 @@ function updatePeds(d) {
         if (k.y > 0.05) { p.body.rotation.x = k.rot * 0.4; personPlay(p.model, 'Hit_Chest', 0.1); }
         else { p.body.rotation.x = lerp(p.body.rotation.x, 0, Math.min(1, d * 8)); personPlay(p.model, 'Death01', 0.15); }
         p.model.mixer.update(d);
+        if (p.hp <= 0 && k.down > 0.4) { const kx = k.vx, kz = k.vz; p.knock = null; p.body.rotation.x = 0; killPed(p, p.x - kx, p.z - kz); continue; }
         if (k.down > 3) { p.knock = null; p.body.rotation.x = 0; snapPed(p); say(p, pick(Math.random, PED_CURSES), false); }
         continue;
       }
       p.g.position.set(p.x, k.y + 0.15, p.z);
       p.body.rotation.x = k.y > 0.05 ? k.rot : lerp(p.body.rotation.x, -Math.PI / 2, Math.min(1, d * 6));
       p.armL.rotation.x = Math.sin(k.rot * 3) * 1.4; p.armR.rotation.x = -Math.sin(k.rot * 3) * 1.4;
+      if (p.hp <= 0 && k.down > 0.4) { p.knock = null; killPed(p, p.x - 1, p.z); continue; }
       if (k.down > 3) { p.knock = null; p.body.rotation.x = 0; snapPed(p); say(p, pick(Math.random, PED_CURSES), false); }
       continue;
     }
@@ -214,10 +217,15 @@ function hitPed(p) {
   p.knock = { vx: fx * v * 0.75 + (Math.random() - 0.5) * 2, vz: fz * v * 0.75 + (Math.random() - 0.5) * 2, vy: 2 + v * 0.18, y: 0.1, rot: 0, spin: -(4 + v * 0.5), down: 0 };
   p.hitCd = 4;
   sfx.bodyHit(Math.min(1.2, v / 10)); flash(0.35); S.shake = Math.max(S.shake, reduceMotion ? 0 : 0.2);
-  popup('Hit a pedestrian', 'bad');
+  // they're hurt, more the faster you were going, and bleed (a hard hit can kill: they don't get up)
+  p.hp = (p.hp ?? 100) - (12 + v * 6);
+  bloodHit(p, p.g.position.y || 0, S.x - fx, S.z - fz, 'car'); p.bleedT = Math.max(p.bleedT || 0, 20);
+  say(p, pick(Math.random, PED_HURT), false);
+  popup(p.hp <= 0 ? 'Hit a pedestrian · they’re not moving' : 'Hit a pedestrian', 'bad');
   addHeat(1.2);     // somebody always calls it in
-  if (v > 10) crash('Hit a pedestrian', 'pole');
-  else S.v *= 0.45;
+  // and you go down too: anything faster than a walk throws you off
+  if (v > 3.5) crash('Hit a pedestrian', 'pole');
+  else S.v *= 0.3;
 }
 // standing poses: [left arm forward, left arm out, right arm forward, right arm out] (radians)
 const IDLE_POSES = ['phone', 'text', 'text', 'fold', 'stand', 'stand'];

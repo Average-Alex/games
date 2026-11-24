@@ -535,6 +535,37 @@ const palmTrunkGeo = (() => {
 })();
 const firTrunkGeo = (() => { const t = new THREE.CylinderGeometry(0.1, 0.3, 11, 8, 1, true); t.translate(0, 5.5, 0); const g = mergeUV([t]); const uv = g.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 2, uv.getY(i) * 6); return g; })();
 // alpha-tested foliage material, with a matching depth material so leaf shadows have holes in them
+// Front-yard hedges, garden walls and bushes (placed along residential streets in map.js). A hedge is built in 2 m
+// modules: an opaque leafy core box with leaf cards poking out of its sides and top, so the edges read as foliage.
+const hedgeCoreGeo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
+const hedgeLeafGeo = (() => {
+  const r = mulberry(77), parts = [];
+  for (let i = 0; i < 34; i++) {
+    const f = i % 5, s = 0.38 + r() * 0.22, p = new THREE.PlaneGeometry(s, s);
+    p.rotateX((r() - 0.5) * 0.9); p.rotateZ(r() * TAU);
+    let x = (r() - 0.5) * 0.95, y = 0.12 + r() * 0.82, z = (r() - 0.5) * 0.9;
+    if (f === 0) { p.rotateX(-Math.PI / 2); y = 1.0 + r() * 0.04; }
+    else if (f === 1) z = 0.5; else if (f === 2) { p.rotateY(Math.PI); z = -0.5; }
+    else if (f === 3) { p.rotateY(Math.PI / 2); x = 0.5; } else { p.rotateY(-Math.PI / 2); x = -0.5; }
+    p.translate(x, y, z);
+    const pa = p.attributes.position, na = p.attributes.normal;
+    for (let k = 0; k < pa.count; k++) { const nx = pa.getX(k), ny = pa.getY(k) - 0.3, nz = pa.getZ(k), L = Math.hypot(nx, ny, nz) || 1; na.setXYZ(k, nx / L, ny / L, nz / L); }
+    parts.push(p);
+  }
+  return mergeUV(parts);
+})();
+// garden wall: a stucco wall module, and a pillar with a cap at each end of a lot
+const gardenWallGeo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
+const gardenPillarGeo = (() => { const a = new THREE.BoxGeometry(0.42, 1, 0.42).translate(0, 0.5, 0), b = new THREE.BoxGeometry(0.52, 0.08, 0.52).translate(0, 1.04, 0); return mergeUV([a, b]); })();
+// the hedge's core: dark leafy green with the leaf cluster drawn all over it (opaque)
+function hedgeTexture(leafTex) {
+  const S = 256, cv = document.createElement('canvas'); cv.width = cv.height = S;
+  const g = cv.getContext('2d'), r = mulberry(31); g.fillStyle = '#2c4422'; g.fillRect(0, 0, S, S);
+  const img = leafTex && leafTex.image;
+  if (img) for (let k = 0; k < 70; k++) { const s = 60 + r() * 70, x = r() * S, y = r() * S; for (const [ox, oy] of [[0, 0], [-S, 0], [0, -S], [-S, -S]]) g.drawImage(img, x + ox - s / 2, y + oy - s / 2, s, s); }
+  const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.encoding = THREE.sRGBEncoding; t.anisotropy = 4;
+  return t;
+}
 function foliageMaterial(map) {
   const low = quality === 'low';
   const m = low ? new THREE.MeshLambertMaterial({ map, alphaTest: 0.45, side: THREE.DoubleSide })
