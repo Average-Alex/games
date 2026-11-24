@@ -3,21 +3,42 @@
 // You hit what you hit: walls stop you, traffic gets shunted, people get run down. Cars can be wrecked.
 'use strict';
 
-const DRIVE = { v: 0, steer: 0, yaw: 0, hp: 100, smokeT: 0 };
+const DRIVE = { v: 0, steer: 0, yaw: 0, hp: 100, smokeT: 0, rpm: 850, gear: 1, thr: 0 };
 const CAR_DRIVER_LINES = ['Hey! My car!!', 'Get out of my car!', 'Somebody stop him!', 'Are you serious?!', 'Help! Carjacking!'];
 
 // the nearest car you could get into: close to its side, not going fast
 function carToTake() {
   let best = null, bd = 3.2;
   for (const u of units) {
-    if (!u.on || u.kind === 'moto' || u.player || (u.v > 9 && !u.parked)) continue;
+    if (!u.on || u.kind === 'moto' || u.player || (u.v > 14 && !u.parked)) continue;
     const d = Math.hypot(u.x - FOOT.x, u.z - FOOT.z);
     if (d < bd + (u.T.L || 4.4) / 2 - 1) { bd = d - (u.T.L || 4.4) / 2 + 1; best = u; }
   }
+  // the cars parked along the curb (map instances until you take one)
+  for (const pc of parkedCars) {
+    const d = Math.hypot(pc.x - FOOT.x, pc.z - FOOT.z) - 1.2;
+    if (d < bd) { bd = d; best = { mapCar: pc, x: pc.x, z: pc.z, parked: true, kind: 'car' }; }
+  }
   return best;
+}
+// a parked map car becomes a real one: the instance is hidden, its hitbox removed, a car model put in its place
+const OWN_CARS = [];
+function realizeParked(pc) {
+  const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+  pc.body.setMatrixAt(pc.k, zero); pc.wh.setMatrixAt(pc.k, zero); pc.body.instanceMatrix.needsUpdate = true; pc.wh.instanceMatrix.needsUpdate = true;
+  const oi = pc.t.obs ? pc.t.obs.indexOf(pc.ob) : -1; if (oi >= 0) pc.t.obs.splice(oi, 1);
+  TAKEN_PARKED.add(parkedKey(pc.x, pc.z)); parkedCars.splice(parkedCars.indexOf(pc), 1);
+  const mdl = buildCarModel(pc.type, carPaint[pc.ci % carPaint.length]); scene.add(mdl.g);
+  mdl.g.position.set(pc.x, roadY(3), pc.z); mdl.g.rotation.set(0, pc.a, 0);
+  const u = { g: mdl.g, body: mdl.body, T: mdl.T, kind: 'car', on: true, parked: true, own: true, x: pc.x, z: pc.z, yaw: pc.a, v: 0, mode: 'free', e: -1, honkCd: 0, nearCd: 0, blockT: 0, chasing: false, bustT: 0, hitT: 0, rock: 0 };
+  units.push(u); OWN_CARS.push(u);
+  // keep a few of these round; older ones you've left behind go
+  while (OWN_CARS.length > 4) { const o = OWN_CARS.find((c) => !c.player); if (!o) break; OWN_CARS.splice(OWN_CARS.indexOf(o), 1); scene.remove(o.g); const ui = units.indexOf(o); if (ui >= 0) units.splice(ui, 1); }
+  return u;
 }
 function takeCar(u) {
   const F = FOOT;
+  if (u.mapCar) u = realizeParked(u.mapCar);
   // the driver is dragged out on the street side and runs
   if (!u.parked) {
     const p = peds.find((q) => !q.on);
@@ -32,9 +53,10 @@ function takeCar(u) {
   }
   u.player = true; u.parked = false; u.chasing = false; u.mode = 'free'; u.next = null;
   F.car = u; F.aiming = false;
-  Object.assign(DRIVE, { v: 0, steer: 0, yaw: u.yaw, hp: u.carHp ?? 100 });
+  Object.assign(DRIVE, { v: 0, steer: 0, yaw: u.yaw, hp: u.carHp ?? 100, rpm: 850, gear: 1, thr: 0 });
   personPlay(F.fig, 'Driving_Loop', 0.2);
-  sfx.thump(0.3);
+  sfx.carStart ? sfx.carStart() : sfx.thump(0.3);
+  speedo.hidden = false;
   camSnap = true;
 }
 function leaveCar() {
@@ -44,7 +66,7 @@ function leaveCar() {
   let x = u.x + lx * 1.6, z = u.z + lz * 1.6;
   if (buildingAt(x, z, 0.3) >= 0) { x = u.x - lx * 1.6; z = u.z - lz * 1.6; }
   u.player = false; u.parked = true; u.v = 0; u.carHp = DRIVE.hp;
-  F.car = null; F.x = x; F.z = z; F.yaw = u.yaw; F.camYaw = u.yaw;
+  F.car = null; speedo.hidden = true; F.x = x; F.z = z; F.yaw = u.yaw; F.camYaw = u.yaw;
   F.fig.g.visible = true; personPlay(F.fig, 'Idle_Loop', 0.2);
   camSnap = true;
 }
@@ -68,6 +90,14 @@ function driveStep(d) {
   a -= D.v * Math.abs(D.v) * 0.0025 + Math.sign(D.v) * 0.4;
   D.v += a * d; if (Math.abs(D.v) < 0.05 && !gas && !brake) D.v = 0;
   D.v = clamp(D.v, -9, top);
+  // revs and gear, for the engine note and the dash (an automatic: up at 6,000, down at 2,500)
+  const av = Math.abs(D.v), GEARS = [0, 9, 17, 26, 35, 99];
+  if (D.v < -0.3) D.gear = -1;
+  else { D.gear = Math.max(1, D.gear || 1); while (D.gear < 5 && av > GEARS[D.gear]) D.gear++; while (D.gear > 1 && av < GEARS[D.gear - 1] * 0.85) D.gear--; }
+  const g = Math.max(1, Math.abs(D.gear)), lo = g === 1 || D.gear < 0 ? 0 : GEARS[g - 1] * 0.75, hi = D.gear < 0 ? 9 : GEARS[g];
+  const wantRpm = wrecked ? 0 : 850 + clamp((av - lo) / Math.max(1, Math.min(hi, 45) - lo), 0, 1) * 5600 + (gas && av < 1 ? 1400 : 0);
+  D.rpm = (D.rpm || 850) + (wantRpm - (D.rpm || 850)) * Math.min(1, d * 8);
+  D.thr += ((gas || (brake && D.v <= 0.5) ? 1 : 0) - D.thr) * Math.min(1, d * 10);
   // steering: tighter at low speed; the handbrake swings the tail
   const maxS = 0.6 / (1 + Math.abs(D.v) / 14);
   D.steer += (steerIn * maxS - D.steer) * Math.min(1, d * 5);
@@ -85,8 +115,12 @@ function driveStep(d) {
   // traffic: shunt it, and it shunts you
   for (const o of units) {
     if (o === u || !o.on) continue;
-    const dx = o.x - u.x, dz = o.z - u.z, dd = Math.hypot(dx, dz), reach = ((o.T.L || 4.4) + (T.L || 4.4)) / 2 * 0.62;
-    if (dd > reach) continue;
+    // (a box overlap in your car's frame, so a car waiting in the next lane doesn't count)
+    const dx = o.x - u.x, dz = o.z - u.z, dd = Math.hypot(dx, dz);
+    if (dd > 8) continue;
+    const sY = Math.sin(D.yaw), cY = Math.cos(D.yaw), along = dx * sY + dz * cY, lat = dx * cY - dz * sY;
+    const oc = Math.abs(Math.cos(o.yaw - D.yaw)), os = Math.abs(Math.sin(o.yaw - D.yaw)), oL = o.T.L || 4.4, oW = o.T.W || 1.9;
+    if (Math.abs(along) > ((T.L || 4.4) + oL * oc + oW * os) / 2 * 0.92 || Math.abs(lat) > ((T.W || 1.9) + oW * oc + oL * os) / 2 * 0.92) continue;
     const rel = Math.abs(D.v - o.v * Math.cos(o.yaw - D.yaw));
     if (rel > 2) { sfx.metal(Math.min(1, rel / 18)); D.hp -= rel * 0.8; if (o.kind === 'car') { sfx.horn(o); say(o, pick(Math.random, CURSES), true); } else addHeat(0.6); }
     o.v *= 0.3; o.hitT = 2; D.v *= 0.55;
@@ -115,6 +149,34 @@ function driveStep(d) {
   const lx = Math.cos(u.yaw), lz = -Math.sin(u.yaw);
   F.x = u.x + lx * 0.37; F.z = u.z + lz * 0.37; F.yaw = u.yaw; F.y = ry - 0.45;
   F.fig.mixer.update(d);
+  updateSpeedo();
+}
+// ---------------------------------------------------------------- the dash: a speedo dial, rev bar, gear and damage
+const speedo = document.createElement('div'); speedo.id = 'speedo'; speedo.hidden = true;
+speedo.innerHTML = `<svg viewBox="0 0 200 200" aria-hidden="true">
+  <path d="M38 158 A80 80 0 1 1 162 158" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="12" stroke-linecap="round"/>
+  <path class="rev" d="M38 158 A80 80 0 1 1 162 158" fill="none" stroke="#ff3d7f" stroke-width="12" stroke-linecap="round" pathLength="100" stroke-dasharray="0 100"/>
+  ${Array.from({ length: 9 }, (_, i) => { const a = (-225 + i * 33.75) * Math.PI / 180; return `<line x1="${100 + Math.cos(a) * 64}" y1="${100 + Math.sin(a) * 64}" x2="${100 + Math.cos(a) * 56}" y2="${100 + Math.sin(a) * 56}" stroke="#fff" stroke-width="2" opacity=".7"/>`; }).join('')}
+  <line class="needle" x1="100" y1="100" x2="100" y2="34" stroke="#ffd24a" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="100" cy="100" r="6" fill="#ffd24a"/></svg>
+  <div class="num"><b>0</b><span>km/h</span></div><div class="gear">1</div><div class="dmg"><i></i></div>`;
+(document.querySelector('#stage') || document.body).append(speedo);
+{ const st = document.createElement('style'); st.textContent = `
+  #speedo { position: absolute; right: 18px; bottom: 18px; z-index: 6; width: 190px; height: 190px; pointer-events: none; color: #fff; font-family: system-ui, sans-serif; filter: drop-shadow(0 2px 6px rgba(0,0,0,.6)); }
+  #speedo[hidden] { display: none; } #speedo svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #speedo .num { position: absolute; left: 0; right: 0; top: 108px; text-align: center; } #speedo .num b { display: block; font: 800 34px/1 system-ui, sans-serif; font-variant-numeric: tabular-nums; } #speedo .num span { font-size: 11px; opacity: .7; letter-spacing: .15em; }
+  #speedo .gear { position: absolute; left: 50%; top: 62px; transform: translateX(-50%); font: 800 18px/1 system-ui, sans-serif; color: #ffd24a; }
+  #speedo .dmg { position: absolute; left: 55px; right: 55px; bottom: 14px; height: 5px; background: rgba(255,255,255,.18); border-radius: 3px; overflow: hidden; } #speedo .dmg i { display: block; height: 100%; background: #3dff8a; }`;
+  document.head.appendChild(st); }
+const speedoEls = { rev: speedo.querySelector('.rev'), needle: speedo.querySelector('.needle'), num: speedo.querySelector('.num b'), gear: speedo.querySelector('.gear'), dmg: speedo.querySelector('.dmg i') };
+function updateSpeedo() {
+  const kmh = Math.abs(DRIVE.v) * 3.6, E = speedoEls;
+  E.num.textContent = Math.round(kmh);
+  E.needle.setAttribute('transform', `rotate(${-135 + Math.min(1, kmh / 240) * 270} 100 100)`);
+  E.rev.setAttribute('stroke-dasharray', `${Math.min(100, DRIVE.rpm / 7000 * 100).toFixed(1)} 100`);
+  E.rev.setAttribute('stroke', DRIVE.rpm > 6000 ? '#ff4a3d' : '#ff3d7f');
+  E.gear.textContent = DRIVE.hp <= 0 ? '—' : DRIVE.gear < 0 ? 'R' : Math.abs(DRIVE.v) < 0.3 && DRIVE.thr < 0.1 ? 'N' : DRIVE.gear;
+  const h = Math.max(0, DRIVE.hp); E.dmg.style.width = h + '%'; E.dmg.style.background = h > 60 ? '#3dff8a' : h > 30 ? '#ffd24a' : '#ff4a3d';
 }
 // ---------------------------------------------------------------- bikes and scooters parked on the street
 // A few rideables stand on the sidewalks round you while you're on foot. F next to one takes it; your own bike is left

@@ -187,6 +187,7 @@ function placeOnRoad(x, z, heading, v, allowHwy) {
 }
 function resetWorld() {
   if (FOOT.on) { if (FOOT.store) leaveStore(); hopOn(); }
+  if (typeof clearFootCops === 'function') clearFootCops();
   clearTiles();
   for (const u of units) deactivate(u);
   if (heli) { heli.on = false; heli.g.visible = false; heli.beam.visible = false; heli.spot.intensity = 0; }
@@ -718,25 +719,78 @@ function makePoints(n, size, color) {
 }
 FX.sparks = makePoints(400, 0.09, 'add');
 FX.splash = makePoints(300, 0.16, 'normal');
-FX.blood = makePoints(300, 0.07, 'normal');
-// a short spray of blood from a hit, flying away from the attacker
+FX.blood = makePoints(900, 0.085, 'normal');
+FX.blood.floor = new Float32Array(900); FX.blood.landed = new Uint8Array(900);
+// blood splats on the ground where drops land, and drip trails (instanced decals, recycled oldest first)
+FX.splats = (() => {
+  const N = 600, mat = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.9, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3 });
+  const im = new THREE.InstancedMesh(new THREE.CircleGeometry(1, 9).rotateX(-Math.PI / 2), mat, N);
+  im.count = 0; im.frustumCulled = false; im.renderOrder = 1; scene.add(im);
+  return { im, N, next: 0, born: new Float32Array(N), size: new Float32Array(N), m4: new THREE.Matrix4(), q: new THREE.Quaternion(), s: new THREE.Vector3(), p: new THREE.Vector3(), c: new THREE.Color(), tick: 0 };
+})();
+// blood dries up and is gone after a while: splats shrink away after BLOOD_LIFE seconds, pools fade
+const BLOOD_LIFE = 35;
+function fadeBlood(d) {
+  const S2 = FX.splats, now = performance.now() / 1000;
+  S2.tick -= d;
+  if (S2.tick <= 0 && S2.im.count) {
+    S2.tick = 0.25; let any = false;
+    for (let i = 0; i < S2.im.count; i++) {
+      const age = now - S2.born[i]; if (age < BLOOD_LIFE || S2.size[i] <= 0) continue;
+      S2.im.getMatrixAt(i, S2.m4); S2.m4.decompose(S2.p, S2.q, S2.s);
+      const k = Math.max(0, 1 - (age - BLOOD_LIFE) / 5);
+      if (k <= 0) { S2.size[i] = 0; S2.s.set(0, 0, 0); } else S2.s.multiplyScalar(0.93);
+      S2.im.setMatrixAt(i, S2.m4.compose(S2.p, S2.q, S2.s)); any = true;
+    }
+    if (any) S2.im.instanceMatrix.needsUpdate = true;
+  }
+  for (let i = FX.pools.length - 1; i >= 0; i--) {
+    const m = FX.pools[i]; m.userData.age = (m.userData.age || 0) + d;
+    if (m.userData.age > BLOOD_LIFE + 15) {
+      if (!m.userData.own) { m.material = POOL_MAT.clone(); m.userData.own = true; }
+      m.material.opacity -= d * 0.25;
+      if (m.material.opacity <= 0) { scene.remove(m); m.material.dispose(); FX.pools.splice(i, 1); }
+    }
+  }
+}
+function bloodSplat(x, y, z, size) {
+  const S2 = FX.splats, i = S2.next; S2.next = (S2.next + 1) % S2.N; S2.im.count = Math.max(S2.im.count, i + 1);
+  S2.born[i] = performance.now() / 1000; S2.size[i] = size;
+  S2.q.setFromAxisAngle(THREE.Object3D.DefaultUp, Math.random() * TAU);
+  S2.s.set(size * (0.7 + Math.random() * 0.6), 1, size * (0.7 + Math.random() * 0.6));
+  S2.im.setMatrixAt(i, S2.m4.compose(S2.p.set(x, y + 0.025, z), S2.q, S2.s));
+  S2.im.setColorAt(i, S2.c.setRGB(0.28 + Math.random() * 0.12, 0.01, 0.015));
+  S2.im.instanceMatrix.needsUpdate = true; S2.im.instanceColor.needsUpdate = true;
+}
+// a spray of blood from a hit, flying away from the attacker (y is about chest height; it lands on the floor below)
 function spawnBlood(x, y, z, dx, dz, n) {
-  const F = FX.blood;
+  const F = FX.blood, floor = y > -100 ? Math.max(0.02, y - 1.18) : y - 1.18;
   for (let k = 0; k < n; k++) {
-    const i = F.next = (F.next + 1) % F.n;
-    F.pos.set([x + (Math.random() - 0.5) * 0.15, y + (Math.random() - 0.5) * 0.2, z + (Math.random() - 0.5) * 0.15], i * 3);
-    F.vel.set([dx * (1 + Math.random() * 2) + (Math.random() - 0.5) * 1.5, 0.5 + Math.random() * 1.8, dz * (1 + Math.random() * 2) + (Math.random() - 0.5) * 1.5], i * 3);
-    F.life[i] = 0.4 + Math.random() * 0.5;
+    const i = F.next = (F.next + 1) % F.n, hard = Math.random() < 0.6;
+    F.pos.set([x + (Math.random() - 0.5) * 0.15, y + (Math.random() - 0.5) * 0.25, z + (Math.random() - 0.5) * 0.15], i * 3);
+    F.vel.set([dx * (hard ? 1.5 + Math.random() * 3.5 : 0.5) + (Math.random() - 0.5) * 2, 0.3 + Math.random() * 2.4, dz * (hard ? 1.5 + Math.random() * 3.5 : 0.5) + (Math.random() - 0.5) * 2], i * 3);
+    F.life[i] = 0.7 + Math.random() * 0.8; F.floor[i] = floor; F.landed[i] = 0;
   }
 }
 // a dark pool spreading under someone who's down (removed with them)
 const POOL_GEO = new THREE.CircleGeometry(1, 20).rotateX(-Math.PI / 2);
-const POOL_MAT = new THREE.MeshBasicMaterial({ color: '#3a0306', transparent: true, opacity: 0.85, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+const POOL_MAT = new THREE.MeshBasicMaterial({ color: '#3a0306', transparent: true, opacity: 0.88, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
 function bloodPool(x, y, z) {
   const m = new THREE.Mesh(POOL_GEO, POOL_MAT); m.position.set(x, y + 0.02, z); m.scale.setScalar(0.05); m.renderOrder = 1;
-  m.userData.grow = 0; scene.add(m); FX.pools.push(m);
-  if (FX.pools.length > 24) scene.remove(FX.pools.shift());
+  m.userData.grow = 0; m.userData.size = 1.1 + Math.random() * 0.6; scene.add(m); FX.pools.push(m);
+  if (FX.pools.length > 24) { const o = FX.pools.shift(); scene.remove(o); if (o.userData.own) o.material.dispose(); }
   return m;
+}
+// your own wounds: the screen edges go red when you're hit, and stay tinted while you're badly hurt
+const hurtVeil = document.createElement('div'); hurtVeil.id = 'hurtVeil';
+(document.querySelector('#stage') || document.body).append(hurtVeil);
+{ const st = document.createElement('style'); st.textContent = '#hurtVeil { position: absolute; inset: 0; z-index: 5; pointer-events: none; opacity: 0; background: radial-gradient(ellipse at center, rgba(120,0,0,0) 45%, rgba(120,0,6,.55) 80%, rgba(70,0,0,.9) 100%); transition: opacity .15s; }'; document.head.appendChild(st); }
+let hurtV = 0;
+function screenBlood(s) { hurtV = Math.min(1, hurtV + s); }
+function updateHurtVeil(d) {
+  const low = typeof FOOT !== 'undefined' && FOOT.on && FOOT.hp < 40 ? (40 - FOOT.hp) / 70 : 0;
+  hurtV = Math.max(0, hurtV - d * 0.7);
+  hurtVeil.style.opacity = Math.max(hurtV, low).toFixed(2);
 }
 FX.pools = [];
 FX.skids = (() => {
@@ -829,7 +883,8 @@ function updateFX(d) {
     if (p.life < 1) p.m.scale.multiplyScalar(Math.max(0.01, 1 - d * 2));
     if (p.life <= 0) p.m.visible = false;
   }
-  for (const m of FX.pools) if (m.userData.grow < 1) { m.userData.grow = Math.min(1, m.userData.grow + d / 5); m.scale.setScalar(0.1 + 0.85 * Math.sqrt(m.userData.grow)); }
+  for (const m of FX.pools) if (m.userData.grow < 1) { m.userData.grow = Math.min(1, m.userData.grow + d / 7); m.scale.setScalar((0.1 + 0.9 * Math.sqrt(m.userData.grow)) * (m.userData.size || 1)); }
+  updateHurtVeil(d); fadeBlood(d);
   for (const [F, grav, hot] of [[FX.sparks, 9, true], [FX.splash, 9, false], [FX.blood, 9, 'blood']]) {
     let any = false;
     for (let i = 0; i < F.n; i++) {
@@ -837,7 +892,15 @@ function updateFX(d) {
       any = true;
       F.life[i] -= d; F.vel[i * 3 + 1] -= grav * d;
       F.pos[i * 3] += F.vel[i * 3] * d; F.pos[i * 3 + 1] += F.vel[i * 3 + 1] * d; F.pos[i * 3 + 2] += F.vel[i * 3 + 2] * d;
-      if (F.pos[i * 3 + 1] < 0.02) { F.pos[i * 3 + 1] = 0.02; F.vel[i * 3 + 1] *= -0.3; F.vel[i * 3] *= 0.7; F.vel[i * 3 + 2] *= 0.7; }
+      const fl = hot === 'blood' ? F.floor[i] : 0.02;
+      if (F.pos[i * 3 + 1] < fl) {
+        F.pos[i * 3 + 1] = fl;
+        if (hot === 'blood') {
+          // blood doesn't bounce: it lands, leaves a splat and stops
+          if (!F.landed[i]) { F.landed[i] = 1; if (Math.random() < 0.45) bloodSplat(F.pos[i * 3], fl, F.pos[i * 3 + 2], 0.05 + Math.random() * 0.13); }
+          F.vel[i * 3] = 0; F.vel[i * 3 + 1] = 0; F.vel[i * 3 + 2] = 0; F.life[i] = Math.min(F.life[i], 0.15);
+        } else { F.vel[i * 3 + 1] *= -0.3; F.vel[i * 3] *= 0.7; F.vel[i * 3 + 2] *= 0.7; }
+      }
       const l = clamp(F.life[i] * 2, 0, 1);
       if (hot === 'blood') F.col.set([0.35 + 0.15 * l, 0.01, 0.02], i * 3);
       else if (hot) F.col.set([1, 0.55 + 0.45 * l, 0.15 + 0.6 * l * l], i * 3); else F.col.set([0.85 * l + 0.1, 0.92 * l + 0.05, 1 * l], i * 3);
@@ -848,6 +911,7 @@ function updateFX(d) {
 function clearFX() {
   for (const p of FX.debris) { p.life = 0; p.m.visible = false; }
   for (const m of FX.pools) scene.remove(m); FX.pools.length = 0;
+  FX.splats.im.count = 0; FX.splats.next = 0; hurtV = 0;
   for (const F of [FX.sparks, FX.splash, FX.blood]) { F.life.fill(0); for (let i = 0; i < F.n; i++) F.pos[i * 3 + 1] = -100; F.p.geometry.attributes.position.needsUpdate = true; }
   FX.skids.im.count = 0; FX.skids.next = 0;
   FX.smoke.age.fill(0); FX.smoke.live = 0.1;
@@ -858,6 +922,7 @@ function flash(v) { flashV = Math.max(flashV, v); }
 // ---------------------------------------------------------------- wanted level and police
 function copNear(range) {
   for (const u of units) if (u.on && !u.player && !u.parked && u.kind !== 'car' && Math.hypot(u.x - S.x, u.z - S.z) < range) return true;
+  if (typeof FCOPS !== 'undefined' && FCOPS.some((p) => !p.dead && Math.hypot(p.x - S.x, p.z - S.z) < range)) return true;
   return !!(heli && heli.on && Math.hypot(heli.x - S.x, heli.z - S.z) < 70);
 }
 function offense(amount) { if (copNear(70)) addHeat(amount, false); }

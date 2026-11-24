@@ -568,6 +568,9 @@ const STOP_GEO = {
 
 // ---------------------------------------------------------------- streamed tiles
 const tiles = new Map();
+// the parked cars along the curbs of the loaded tiles (instances), and the ones taken (so a rebuilt tile leaves them out)
+const parkedCars = [], TAKEN_PARKED = new Set();
+const parkedKey = (x, z) => `${Math.round(x * 2)},${Math.round(z * 2)}`;
 const liveSignals = new Set();
 // Streamed street tiles round you: 5 x 5 on Low/Medium/High (the far skyline shows the city beyond), 7 x 7 on Ultra.
 // Laptop graphics are held back by the number of things drawn, so this matters more than resolution.
@@ -582,10 +585,10 @@ function disposePart(t, part) {
   for (const d of p.disp) d.dispose && d.dispose();
   if (p.signs) for (const s of p.signs) releaseSign(s);
   if (p.signals) for (const s of p.signals) liveSignals.delete(s);
-  if (part === 'detail') t.obs = t.baseObs ? t.baseObs.slice() : [];
+  if (part === 'detail') { t.obs = t.baseObs ? t.baseObs.slice() : []; for (let i = parkedCars.length - 1; i >= 0; i--) if (parkedCars[i].t === t) parkedCars.splice(i, 1); }
   t[part] = null;
 }
-function clearTiles() { for (const t of [...tiles.values()]) disposeTile(t); tiles.clear(); liveSignals.clear(); }
+function clearTiles() { for (const t of [...tiles.values()]) disposeTile(t); tiles.clear(); liveSignals.clear(); parkedCars.length = 0; TAKEN_PARKED.clear(); }
 function updateTiles(cx, cz, force) {
   if (!MAP) return;
   const ti = Math.floor(cx / TILE), tj = Math.floor(cz / TILE), RB = tileRadius(), RD = 1;
@@ -1355,8 +1358,10 @@ function buildDetail(t) {
         if (hitAt(x, z, 1.2) || obs.some((o) => o.length === 4 && Math.hypot(o[0] - x, o[1] - z) < o[2] + 1.6)) continue;
         if (m.stops.length && (m.tStop.get(t.key) || []).some((si) => Math.hypot(m.stops[si][0] - x, m.stops[si][1] - z) < 12)) continue;
         const type = PT[Math.floor(hash2(e, Math.round(s), 7) * 3)];
-        parked[type].push([x, z, Math.atan2(tx / tl * side, tz / tl * side), Math.floor(hash2(e, Math.round(s), 9) * C.cars.length)]);
-        obs.push([x - tx / tl * 1.7, z - tz / tl * 1.7, x + tx / tl * 1.7, z + tz / tl * 1.7, 'Hit a parked car', 0.85]);
+        if (TAKEN_PARKED.has(parkedKey(x, z))) continue;          // (taken earlier: it's a real car now, or gone)
+        const ob = [x - tx / tl * 1.7, z - tz / tl * 1.7, x + tx / tl * 1.7, z + tz / tl * 1.7, 'Hit a parked car', 0.85];
+        parked[type].push([x, z, Math.atan2(tx / tl * side, tz / tl * side), Math.floor(hash2(e, Math.round(s), 9) * C.cars.length), ob]);
+        obs.push(ob);
       }
     }
   }
@@ -1365,10 +1370,12 @@ function buildDetail(t) {
     const G_ = carGeo(type), q = new THREE.Quaternion(), m4 = new THREE.Matrix4(), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3(), col = new THREE.Color();
     // (the painted shell carries its glass and trim as vertex colours: two draws per car type)
     const body = new THREE.InstancedMesh(G_.shell, MM.parkedPaint, list.length), wh = new THREE.InstancedMesh(G_.wheels, carMats.wheel, list.length);
-    list.forEach(([x, z, a, ci], k) => {
+    list.forEach(([x, z, a, ci, ob], k) => {
       q.setFromAxisAngle(Yv, a); m4.compose(p.set(x, roadY(3), z), q, one);
       body.setMatrixAt(k, m4); wh.setMatrixAt(k, m4);
       col.set(C.cars[ci]); body.setColorAt(k, col);
+      // on foot you can get into these: drive.js swaps the instance for a real car
+      parkedCars.push({ x, z, a, ci, type, body, wh, k, ob, t });
     });
     body.castShadow = true;
     g.add(body, wh); disp.push(body, wh);

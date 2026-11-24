@@ -103,13 +103,13 @@ function updatePeds(d) {
     if (!p.on) continue;
     active++;
     const dist = Math.hypot(p.x - bx, p.z - bz);
-    if (dist > 180 && !p.knock) { p.on = false; p.g.visible = false; p.dead = false; p.flee = null; continue; }
+    if (dist > 180 && !p.knock) { p.on = false; p.g.visible = false; p.dead = false; p.flee = null; p.bleedT = 0; p.hits = 0; continue; }
     p.hitCd -= d;
     if (p.dead) {
       // down for good: lies there a while, then is gone
       p.deadT += d;
       if (p.model) { p.animT = (p.animT || 0) + d; if (p.animT > 0.05) { p.model.mixer.update(p.animT); p.animT = 0; } }
-      if (p.deadT > 30 || dist > 120) { p.on = false; p.g.visible = false; p.dead = false; }
+      if (p.deadT > 30 || dist > 120) { p.on = false; p.g.visible = false; p.dead = false; p.bleedT = 0; p.hits = 0; }
       continue;
     }
     if (p.flee && !p.knock) { fleeStep(p, d, dist); continue; }
@@ -237,11 +237,30 @@ const PED_SCREAM = ['RUN!', 'Call 911!', 'Oh my god!', 'Get down!', 'Help!!', 'H
 function hurtPed(p, dmg, fromX, fromZ, how) {
   if (!p.on || p.dead) return;
   p.hp = (p.hp ?? 100) - dmg;
-  { const ax = p.x - fromX, az = p.z - fromZ, L = Math.hypot(ax, az) || 1; spawnBlood(p.x, (p.g.position.y || 0) + 1.2, p.z, ax / L, az / L, how === 'fists' ? 4 : 14); }
+  bloodHit(p, (p.g.position.y || 0), fromX, fromZ, how);
   if (p.hp <= 0) { killPed(p, fromX, fromZ); return; }
   if (p.model) { p.model.cur = null; personPlay(p.model, how === 'shot' ? 'Hit_Chest' : 'Hit_Head', 0.06); }
   say(p, pick(Math.random, PED_HURT), false);
   p.stagger = 0.7; startFlee(p, fromX, fromZ, 10);
+}
+// a hit: blood out of the wound away from the attacker (a heavy spray for a gun or a knife, a spatter for a punch, more
+// with every hit), a little back toward them from a gunshot, drops at their feet, and they bleed as they go
+function bloodHit(p, gy, fromX, fromZ, how) {
+  const ax = p.x - fromX, az = p.z - fromZ, L = Math.hypot(ax, az) || 1, ux = ax / L, uz = az / L;
+  p.hits = (p.hits || 0) + 1;
+  const n = how === 'fists' ? 8 : how === 'car' ? 30 : 26 + Math.min(30, p.hits * 6);
+  spawnBlood(p.x, gy + 1.2 + (Math.random() - 0.5) * 0.3, p.z, ux, uz, n);
+  if (how === 'shot') spawnBlood(p.x, gy + 1.2, p.z, -ux * 0.5, -uz * 0.5, 8);
+  for (let k = 0; k < (how === 'fists' ? 1 : 3); k++) bloodSplat(p.x + (Math.random() - 0.5) * 0.6 + ux * 0.3, gy, p.z + (Math.random() - 0.5) * 0.6 + uz * 0.3, 0.08 + Math.random() * 0.16);
+  if (how !== 'fists') p.bleedT = Math.max(p.bleedT || 0, 12);
+}
+// the wounded leave a trail of drops (and a smear where they stand)
+function bleedStep(list, d, gyOf) {
+  for (const p of list) {
+    if (!p.on || !(p.bleedT > 0)) continue;
+    p.bleedT -= d; p.dripT = (p.dripT || 0) - d;
+    if (p.dripT <= 0) { p.dripT = p.dead ? 1.2 : 0.18 + Math.random() * 0.2; bloodSplat(p.x + (Math.random() - 0.5) * 0.3, gyOf(p), p.z + (Math.random() - 0.5) * 0.3, p.dead ? 0.2 : 0.04 + Math.random() * 0.07); }
+  }
 }
 function killPed(p, fromX, fromZ) {
   p.dead = true; p.deadT = 0; p.flee = null; p.knock = null; p.idle = 0; p.watch = null;

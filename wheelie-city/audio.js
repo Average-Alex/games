@@ -97,6 +97,7 @@ registerProcessor('wc-engine', class extends AudioWorkletProcessor {
 
 const sfx = (() => {
   let ctx = null, master = null, noiseBuf = null, engine = null, engineGain = null, ready = false, pendingCfg = null;
+  let carO1, carO2, carSub, carF, carG, carRoadG;
   let windG, windF, buffG, rainG, scrapeG, scrapeF, slideG, skidG, skidTone, skidF, heliG, heliP, cityG;
   const sirens = [], traffic = [];
   function engineCfg() {
@@ -168,6 +169,13 @@ const sfx = (() => {
       const tw = ctx.createOscillator(); tw.frequency.value = 4800; const twg = gain(0.015);
       tw.connect(twg); twg.connect(amp);
       heliG = gain(0); heliP = panner(); amp.connect(heliG); heliG.connect(heliP); heliP.connect(master); lfo.start(); tw.start(); }
+    // a car you're driving: firing pulses (two slightly detuned saws and a sub an octave down) through a growl and a
+    // lowpass that opens with the throttle, plus tyre and road roar
+    { carO1 = ctx.createOscillator(); carO1.type = 'sawtooth'; carO2 = ctx.createOscillator(); carO2.type = 'sawtooth'; carSub = ctx.createOscillator(); carSub.type = 'square';
+      const m1 = gain(0.5), m2 = gain(0.35), ms = gain(0.4), sh = shaper(2.4); carF = filt('lowpass', 600, 1.4); carG = gain(0);
+      carO1.connect(m1); carO2.connect(m2); carSub.connect(ms); m1.connect(sh); m2.connect(sh); ms.connect(sh); sh.connect(carF); carF.connect(carG); carG.connect(master);
+      carO1.start(); carO2.start(); carSub.start();
+      const s = noiseSrc(), lp = filt('lowpass', 350, 0.6); carRoadG = gain(0); s.connect(lp); lp.connect(carRoadG); carRoadG.connect(master); }
     // engine
     engineGain = gain(0.9); engineGain.connect(master);
     const cfg = engineCfg();
@@ -211,14 +219,25 @@ const sfx = (() => {
     if (!ctx || !ready) return;
     const t = ctx.currentTime, play = state === 'play', live = play && !S.crashed && !S.riding;
     listener();
-    const v = live ? S.v : 0;
-    engine.post({ rpm: S.rpm || 0, thr: live ? S.thr : 0, speed: v, on: live || (state === 'menu') ? 1 : 0, lim: S.limiter ? 1 : 0 });
-    engineGain.gain.setTargetAtTime(state === 'menu' ? 0.35 : 0.9, t, 0.2);
+    const v = live ? S.v : 0, onFoot = typeof FOOT !== 'undefined' && FOOT.on, inRoom = onFoot && !!FOOT.store;
+    // the bike's engine only runs while you're riding it (not on foot, in a car, in a room, or on the menu)
+    const bikeOn = live && !onFoot;
+    engine.post({ rpm: S.rpm || 0, thr: live ? S.thr : 0, speed: v, on: bikeOn ? 1 : 0, lim: S.limiter ? 1 : 0 });
+    // the car you're driving (drive.js works out its revs and gear)
+    const drv = play && onFoot && FOOT.car && DRIVE.hp > 0;
+    if (drv) {
+      const f = DRIVE.rpm / 60 * 4, thr = DRIVE.thr;   // a V8 fires four times a revolution
+      carO1.frequency.setTargetAtTime(f, t, 0.03); carO2.frequency.setTargetAtTime(f * 1.012, t, 0.03); carSub.frequency.setTargetAtTime(f / 2, t, 0.03);
+      carF.frequency.setTargetAtTime(260 + thr * 1500 + DRIVE.rpm * 0.12, t, 0.05);
+      carG.gain.setTargetAtTime(0.07 + thr * 0.13, t, 0.05);
+    } else carG.gain.setTargetAtTime(0, t, 0.15);
+    carRoadG.gain.setTargetAtTime(play && onFoot && FOOT.car ? Math.min(0.35, Math.abs(DRIVE.v) * 0.012) : 0, t, 0.15);
+    engineGain.gain.setTargetAtTime(bikeOn ? 0.9 : 0, t, 0.2);
     windG.gain.setTargetAtTime(live ? Math.min(0.5, v * v * 0.0009) : 0, t, 0.15);
     windF.frequency.setTargetAtTime(300 + v * 35, t, 0.2);
     buffG.gain.setTargetAtTime(live ? Math.min(0.5, Math.max(0, v - 14) * 0.03) * (0.6 + 0.4 * Math.random()) : 0, t, 0.05);
-    rainG.gain.setTargetAtTime(play ? 0.07 * WX.rain : 0, t, 0.3);
-    cityG.gain.setTargetAtTime(play ? 0.05 : 0, t, 0.5);
+    cityG.gain.setTargetAtTime(play && !inRoom ? 0.035 : 0, t, 0.5);
+    rainG.gain.setTargetAtTime(play && !inRoom ? 0.07 * WX.rain : 0, t, 0.3);
     scrapeG.gain.setTargetAtTime(S.scrape || 0, t, 0.04); scrapeF.frequency.setTargetAtTime(1800 + Math.random() * 1600, t, 0.02);
     slideG.gain.setTargetAtTime(S.bodySlide || 0, t, 0.05);
     skidG.gain.setTargetAtTime(S.skid || 0, t, 0.04); skidTone.frequency.setTargetAtTime(1350 + Math.random() * 220, t, 0.015);
@@ -238,11 +257,12 @@ const sfx = (() => {
       setPos(s.p, u.x, 1.6, u.z);
     });
     // traffic near you
-    const cars = play ? units.filter((u) => u.on && u.kind === 'car').sort((a, b) => Math.hypot(a.x - S.x, a.z - S.z) - Math.hypot(b.x - S.x, b.z - S.z)) : [];
+    // (only moving traffic: parked and stopped cars, and the one you're driving, make no hum)
+    const cars = play && !inRoom ? units.filter((u) => u.on && u.kind === 'car' && !u.parked && !u.player && u.v > 1).sort((a, b) => Math.hypot(a.x - S.x, a.z - S.z) - Math.hypot(b.x - S.x, b.z - S.z)) : [];
     traffic.forEach((tr, i) => {
       const u = cars[i];
       if (!u) { tr.g.gain.setTargetAtTime(0, t, 0.3); return; }
-      tr.g.gain.setTargetAtTime(0.06 + Math.min(0.25, u.v * 0.012), t, 0.2);
+      tr.g.gain.setTargetAtTime(Math.min(0.22, u.v * 0.01), t, 0.2);
       tr.lp.frequency.setTargetAtTime(250 + u.v * 40, t, 0.2);
       tr.hum.frequency.setTargetAtTime(38 + u.v * 3.2, t, 0.2);
       setPos(tr.p, u.x, 0.6, u.z);
@@ -260,6 +280,14 @@ const sfx = (() => {
     init, update, setBike,
     thump(s) { if (!can()) return; tone('sine', 90, 45, 0.35 + 0.5 * s, 0.004, 0.2); noiseHit('lowpass', 300, 0.7, 0.2 * s, 0.002, 0.08); },
     pop() { if (!can()) return; tone('sine', 160, 90, 0.18, 0.003, 0.09); },
+    // getting into a car: the door, then the starter cranking and the engine catching
+    carStart() {
+      if (!can()) return;
+      const t = ctx.currentTime;
+      noiseHit('lowpass', 500, 0.8, 0.5, 0.002, 0.12, null, t); tone('sine', 120, 60, 0.4, 0.003, 0.15, null, t);
+      for (let i = 0; i < 5; i++) { tone('sawtooth', 38, 30, 0.12, 0.01, 0.09, null, t + 0.35 + i * 0.11); noiseHit('bandpass', 260, 2, 0.12, 0.01, 0.08, null, t + 0.35 + i * 0.11); }
+      tone('sawtooth', 60, 140, 0.22, 0.02, 0.35, null, t + 0.95);
+    },
     // on foot: a pistol shot (crack, body and a short tail off the buildings), a swing through the air, the till
     gun() {
       if (!can()) return;

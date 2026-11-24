@@ -139,21 +139,33 @@ function renderWardrobePanel() {
   const done = document.createElement('button'); done.type = 'button'; done.className = 'done'; done.textContent = 'DONE'; done.onclick = closeWardrobe;
   P.appendChild(done);
 }
-function openWardrobe() {
-  if (!PEOPLE.ready) { loadPeople().then((ok) => { if (ok) openWardrobe(); }); $('#mapStatus').textContent = 'Loading the wardrobe…'; return; }
+// opts.fromGame: opened from a clothes shop's changing room mid-game; closing goes straight back to the shop
+function openWardrobe(opts) {
+  if (!PEOPLE.ready) { loadPeople().then((ok) => { if (ok) openWardrobe(opts); }); $('#mapStatus').textContent = 'Loading the wardrobe…'; return; }
+  WARD.fromGame = !!(opts && opts.fromGame);
   buildWardrobeRoom(); WARD.g.visible = true;
   refreshWardrobeFigure(); renderWardrobePanel();
   state = 'wardrobe'; $('#start').hidden = true; $('#hud').hidden = true; wardPanel.hidden = false;
+  if (WARD.fromGame) { setKeyBubble(); if (document.pointerLockElement) document.exitPointerLock(); }
   camSnap = true;
 }
 function closeWardrobe() {
   wardPanel.hidden = true; if (WARD.g) WARD.g.visible = false;
+  if (WARD.fromGame) {
+    // back in the shop, in the new clothes
+    WARD.fromGame = false; state = 'play'; $('#hud').hidden = false;
+    if (FOOT.fig) { scene.remove(FOOT.fig.g); FOOT.fig.mixer.stopAllAction(); FOOT.fig = null; }
+    if (buildFootFigure()) { FOOT.fig.g.visible = true; personPlay(FOOT.fig, 'Idle_Loop', 0.1); syncPlayerState(); }
+    camSnap = true; last = performance.now(); lockPointer();
+    popup('New look', 'good');
+    return;
+  }
   state = 'menu'; show('#start');
   // the rider wears the new look too
   if (rig && !FOOT.on) { buildBike(); if (MAP) placeRig(0); }
   camSnap = true;
 }
-$('#wardrobeBtn') && $('#wardrobeBtn').addEventListener('click', openWardrobe);
+$('#wardrobeBtn') && $('#wardrobeBtn').addEventListener('click', () => openWardrobe());
 addEventListener('keydown', (e) => { if (state === 'wardrobe' && (e.code === 'Escape' || e.code === 'Enter')) closeWardrobe(); });
 function updateWardrobe(dt) {
   if (!WARD.fig) return;
