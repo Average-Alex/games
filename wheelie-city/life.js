@@ -98,6 +98,7 @@ function pedPlace(p) {
 }
 function updatePeds(d) {
   if (!MAP) return;
+  updateCalls(d);
   const want = peds.length, bx = S.x, bz = S.z, fx = Math.sin(S.psi), fz = Math.cos(S.psi);
   let active = 0;
   for (const p of peds) {
@@ -222,7 +223,7 @@ function hitPed(p) {
   bloodHit(p, p.g.position.y || 0, S.x - fx, S.z - fz, 'car'); p.bleedT = Math.max(p.bleedT || 0, 20);
   say(p, pick(Math.random, PED_HURT), false);
   popup(p.hp <= 0 ? 'Hit a pedestrian · they’re not moving' : 'Hit a pedestrian', 'bad');
-  addHeat(1.2);     // somebody always calls it in
+  reportCrime(p.x, p.z, 1.2, true, { outside: true });     // (a crash is loud: anyone round about hears it)
   // and you go down too: anything faster than a walk throws you off
   if (v > 3.5) crash('Hit a pedestrian', 'pole');
   else S.v *= 0.3;
@@ -279,8 +280,48 @@ function killPed(p, fromX, fromZ) {
   if (p.model) { p.model.cur = null; personPlay(p.model, 'Death01', 0.06); }
   else p.body.rotation.x = -Math.PI / 2;
   setTimeout(() => bloodPool(p.x - Math.sin(p.yaw) * 0.7, p.g.position.y, p.z - Math.cos(p.yaw) * 0.7), 900);
-  addHeat(1.4);                       // somebody always calls it in
+  reportCrime(p.x, p.z, 1.4, false);  // if anyone saw it, they call it in
   panic(p.x, p.z, 35);
+}
+// ---- witnesses. The police only know about a crime if a cop sees or hears it, or someone calls it in: the nearest
+// person who saw it (or heard the gunshot) gets their phone out and takes a few seconds to call 911. Stop them first
+// (or there's nobody round to see) and no one calls. Inside a building the people there call (roomCrime in foot.js).
+const CALLS = [];
+const CALL_LINES = ["I'm calling 911!", 'Police! Somebody help!', 'Yes, 911? There\'s a guy…', 'Hello, police? Hurry!'];
+function sightClear(x0, z0, x1, z1) { const dx = x1 - x0, dz = z1 - z0, L = Math.hypot(dx, dz); for (let s = 2; s < L - 1; s += 2) if (buildingAt(x0 + dx / L * s, z0 + dz / L * s, 0) >= 0) return false; return true; }
+function reportCrime(x, z, amount, loud, opts = {}) {
+  if (FOOT.store && typeof roomCrime === 'function' && !opts.outside) { roomCrime(); return; }
+  // a cop close enough to see (or hear, for gunfire) knows straight away
+  if (copNear(loud ? 90 : 40)) { addHeat(amount); return; }
+  // a call already being made about something here: it'll mention this too
+  const open = CALLS.find((c) => Math.hypot(c.x - x, c.z - z) < 90);
+  if (open) { open.amount += amount; return; }
+  // no one to call: a phone call that happens anyway (on the train, say), or the nearest witness
+  if (opts.caller === 'anyone') { CALLS.push({ p: null, x, z, amount, t: opts.t || 8 }); return; }
+  const r = loud ? 75 : 32;
+  let best = null, bd = 1e9;
+  for (const p of peds) {
+    if (!p.on || p.dead || p.knock || p.calling) continue;
+    const d = Math.hypot(p.x - x, p.z - z);
+    if (d > r || d >= bd) continue;
+    if (!loud && !sightClear(p.x, p.z, x, z)) continue;          // (a gunshot is heard round corners; anything else has to be seen)
+    bd = d; best = p;
+  }
+  if (!best) return;                                              // nobody saw it
+  best.calling = true; best.pose = 'phone';
+  say(best, pick(Math.random, CALL_LINES), false);
+  CALLS.push({ p: best, x, z, amount, t: 6 + Math.random() * 6 });
+  popup('A witness is calling the police: stop them, or get away', 'cop');
+}
+function updateCalls(d) {
+  for (let i = CALLS.length - 1; i >= 0; i--) {
+    const c = CALLS[i];
+    // the caller knocked out or worse: the call never goes through (if they wandered off out of sight, it still does)
+    if (c.p && c.p.on && (c.p.dead || c.p.knock)) { CALLS.splice(i, 1); c.p.calling = false; popup('Nobody called it in', 'good'); continue; }
+    if (c.p && !c.p.on) { c.p.calling = false; c.p = null; }
+    c.t -= d;
+    if (c.t <= 0) { CALLS.splice(i, 1); if (c.p) c.p.calling = false; popup('Someone called the police', 'cop'); addHeat(c.amount); }
+  }
 }
 function startFlee(p, fromX, fromZ, t) { if (!p.on || p.dead) return; p.flee = { fx: fromX, fz: fromZ, t }; p.idle = 0; p.watch = null; }
 function panic(x, z, r) {

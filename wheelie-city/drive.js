@@ -48,7 +48,8 @@ function takeCar(u) {
       p.x = u.x + lx * 1.4; p.z = u.z + lz * 1.4; p.yaw = Math.atan2(lx, lz); p.g.position.set(p.x, 0.03, p.z);
       startFlee(p, u.x, u.z, 10); say(p, pick(Math.random, CAR_DRIVER_LINES), false);
     }
-    addHeat(u.kind === 'cop' ? 2.05 : copNear(90) ? 1.2 : 0.4);
+    // a police car: they know at once (it's their car). Anyone else: the driver, or whoever saw, calls it in
+    if (u.kind === 'cop') addHeat(2.05); else reportCrime(u.x, u.z, 1.0, false, { outside: true });
     popup(u.kind === 'cop' ? 'Stole a police car!' : 'Carjacked!', u.kind === 'cop' ? 'cop' : 'bad');
   }
   u.player = true; u.parked = false; u.chasing = false; u.mode = 'free'; u.next = null;
@@ -134,7 +135,7 @@ function driveStep(d) {
     if (Math.abs(along) < (T.L || 4.4) / 2 + 0.3 && Math.abs(lat) < (T.W || 1.9) / 2 + 0.25 && (p.hitCd || 0) <= 0) {
       p.hitCd = 1.5; hurtPed(p, Math.abs(D.v) * 9, u.x - fx * 3, u.z - fz * 3, 'car'); sfx.bodyHit(Math.min(1, Math.abs(D.v) / 12));
       if (!p.dead) startFlee(p, u.x, u.z, 8);
-      addHeat(copNear(90) ? 1 : 0.4);
+      reportCrime(p.x, p.z, 1.0, true, { outside: true });
     }
   }
   // a wreck smokes, and won't drive

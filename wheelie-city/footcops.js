@@ -92,7 +92,7 @@ function updateFootCops(d) {
   if (state !== 'play') return;
   const onFoot = FOOT.on && !FOOT.store, st = stars();
   // more officers the hotter you are
-  const want = onFoot && !FOOT.car && st >= 1 && FOOT.downT <= 0 ? Math.min(6, 1 + st) : 0;
+  const want = onFoot && !FOOT.car && !FOOT.air && !FOOT.roof && st >= 1 && FOOT.downT <= 0 ? Math.min(6, 1 + st) : 0;
   fcopSpawnT -= d;
   if (FCOPS.filter((p) => !p.dead && !p.inRoom).length < want && fcopSpawnT <= 0) fcopSpawnT = spawnFootCop() ? 2.5 : 0.5;
   if (FOOT.on && FOOT.store) raidRoom(d);
@@ -138,11 +138,11 @@ function updateFootCops(d) {
         if (sees && dist < 30 && p.shotT <= 0) {
           p.shotT = 0.9 + Math.random() * 0.9;
           m.cur = null; personPlay(m, 'Pistol_Shoot', 0.05); sfx.gun && sfx.gun();
-          if (FOOT.car) { DRIVE.hp -= 3; sfx.metal(0.2); }
+          if (FOOT.air) { FOOT.air.hp -= 2; sfx.metal(0.2); } else if (FOOT.car) { DRIVE.hp -= 3; sfx.metal(0.2); }
           else if (Math.random() < clamp(0.62 - dist * 0.022, 0.18, 0.55)) footHurt(8 + Math.random() * 7, 'Shot by the police');
           if (Math.random() < 0.15) say(p, pick(Math.random, FCOP_LINES.shoot), false);
         }
-      } else if (!FOOT.car) {
+      } else if (!FOOT.car && !FOOT.air) {
         // run you down and cuff you
         if (dist > 1.3) { speed = dist > 6 ? 5.4 : 3.2; anim = dist > 6 ? 'Sprint_Loop' : 'Jog_Fwd_Loop'; }
         else { anim = 'Interact'; if (!arresting || dist < arresting.d) arresting = { p, d: dist }; }

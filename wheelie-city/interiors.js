@@ -272,7 +272,7 @@ function buildClothes(shop) {
       const it = items[Math.floor(Math.random() * items.length)];
       if (!takeItem(it[0], Math.round(it[1] + Math.random() * (it[2] - it[1])))) return;
       const c = ROOM.people.find((q) => q.role === 'cashier' && !q.dead && !q.cower);
-      if (c && Math.random() < 0.45) { say(c, pick(Math.random, ['Hey! You have to pay for that!', 'Security!', "I'm calling the police!"]), false); addHeat(0.9); }
+      if (c && Math.random() < 0.45) { say(c, pick(Math.random, ['Hey! You have to pay for that!', 'Security!', "I'm calling the police!"]), false); roomCrime(); }
     });
   });
   ROOM.g.add(im);

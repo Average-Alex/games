@@ -61,12 +61,14 @@ Browser games, published at https://average-alex.github.io/games/
 - **One speedometer for everything:** the car's dial (speed, revs or throttle, gear) is now top left on bikes, scooters and cars, scaled to each vehicle's top speed; cars also show damage.
 - **The market (T) works from a car.**
 - **SkyTrain robbery:** look at a passenger near your seat and press E; they hand over their wallet or phone and someone calls it in.
-- **Every city in sunny daytime:** LA was golden hour, Vegas night and New York dusk; all five are now clear daytime with a blue sky, the sun 40–50° up, hard shadows and less haze. New Poly Haven skies (CC0): `day_la` (`qwantani_afternoon_puresky`), `day_vegas` (`qwantani_noon_puresky`), `day_nyc` (`kloofendal_43d_clear_puresky`); Vancouver and Miami keep theirs, and Vancouver rains less often. Neutral daytime grades, light concrete sidewalks, grey roads and greener verges everywhere. Vegas signs and neon stay on. `tools/fetch_assets.py skies` now only downloads skies it doesn't have yet (the old `night_vegas`, `dusk_nyc` and `sunset_la` files are still there if a night/dusk option is wanted).
+- **City moods:** each city keeps its own time of day and weather (LA golden hour, Vegas at night, NYC at dusk, Vancouver's rain and cloud, Miami sun). A brief all-sunny version was tried and reverted. Daytime skies for LA, Vegas and NYC were fetched for it and are still in `assets/sky` (`day_la`, `day_vegas`, `day_nyc`, Poly Haven CC0) for a future time-of-day option. Light concrete sidewalks and greyer roads were kept. `tools/fetch_assets.py skies` now only downloads skies it doesn't have yet.
 - **Front yards:** streets of houses and apartments get a hedge, a stucco garden wall with pillars, or an open lawn with bushes in front of each lot (driveway gaps between), just behind the sidewalk. They're solid. Not drawn on Low quality.
 - **New car models** (`vehicles.js` `carGeo`): rounded profiles, sides that tuck in under the sills and narrow at the shoulder, fenders that bulge over the wheels, door seams and chrome handles, a glasshouse with rubber seals, black window frames and B-pillars (windshield and rear window as glass, pillars painted), chrome-surround grilles and lower intakes, mirrors on stalks, headlights and tail lights that wrap round the corners (placed on the actual body surface), amber indicators, a rear light bar, dished alloy wheels with twin spokes and brake discs, black cladding on SUVs and pickups, a bed liner in pickups. Paint is less metallic and more clear-coated.
 - **Leafy residential streets:** trees in most front yards and some along the curb on streets of houses, every city (palms mixed in in LA, Vegas and Miami). Not on Low.
 - **House roofs:** small houses get pitched roofs (gable on plain four-cornered houses, hip roofs otherwise) with 40 cm overhanging eaves and fascia boards, real roof tiles lit by their slope, terracotta in the sunny cities and slate grey or brown elsewhere.
 - **Road wear:** repaired patches, sealed crack lines and manhole covers on ordinary streets (not highways, not on Low).
+- **Helicopters and planes** (`wheelie-city/air.js`). Small planes line up at the end of the runway (found automatically: the longest clear strip on the airfield) at the real airports inside each map: YVR, Santa Monica, Harry Reid, MIA. Helicopters sit near them, at New York's Downtown Manhattan and West 30th Street heliports, and on a helipad on the roof of some high-rises (elevator → Roof). F to get in/out (landed and stopped). Helicopter: W/S tilt, A/D or mouse turn, Space up, Shift down. Plane: W/S throttle, A/D or mouse bank, Space/Shift or mouse pitch; rotate at ~130 km/h, stalls below ~110. Land on roofs and walk about up there. Hitting buildings, landing hard or ditching in the water crashes. The theft gets reported after a while.
+- **Witnesses:** the police only find out about a crime if a cop sees or hears it, or someone calls it in: the nearest person who saw it (or heard the gunshot) gets their phone out and takes 6–12 s to call 911; knock them out first and nobody calls. Indoors, someone inside calls unless nobody's left standing; bank alarms still go straight through.
 - **Road markings:** two-way streets wider than a lane each way get solid white edge lines in from the curb.
 - **Vegas neon.** The resort towers and casino roofs on the Strip now have neon bands round their tops, and the towers have light strips up their corners.
 
@@ -80,7 +82,7 @@ The work from the other Claude window (new street bikes, `transit.js` station wa
    - I haven't measured the live version under the same conditions yet, so I don't know if that's slower than before.
    - Next: try it on the Chromebook. If it's slow, make Low/Med skip the photo facades and the far skyline.
 3. **Chromebook frame rate.** Draw calls went down, but each pixel costs more (photo materials, sky, half-float post-processing). The governor lowers resolution automatically. It still needs a real Chromebook test.
-4. **Time of day option.** Every city is daytime now; a menu choice could bring back Vegas at night, NYC at dusk and LA at golden hour (the skies are still in `assets/sky`).
+4. **Time of day option.** A menu choice (or a day/night cycle) could use the daytime skies in `assets/sky` alongside each city's own mood.
 5. **More landmarks.** Add more to `LANDMARK_SITES` in `landmarks.js` in the same way:
    - LA: Griffith Observatory, the Hollywood sign, the Capitol Records building
    - Miami: Freedom Tower
@@ -105,6 +107,8 @@ python tools/build_maps.py C:/Users/alexd/games-osm [city]       # streets and b
 python tools/fetch_assets.py                                      # textures and skies -> wheelie-city/assets
 python tools/build_terrain.py [city]                              # terrain and imagery -> wheelie-city/terrain
 ```
+
+**Before each push, bump the `?v=` on the script tags in `wheelie-city.html`** (all 19 share one value). Browsers otherwise keep running old cached copies of the game files after an update.
 
 The headless-Chrome tests live in `C:\Users\alexd\games-test`:
 - `node test.mjs <city> <bike>` runs a full gameplay pass.

@@ -534,7 +534,8 @@ function robPassenger(p) {
   else { addCash(amt); popup(`Robbed a passenger +$${amt} · ${pick(Math.random, TRAIN_ROB_LINES)}`, 'good'); sfx.cash && sfx.cash(); }
   // the rest of the car: some put their hands up too, and somebody's on the phone to transit police
   for (const q of carPeople.children) if (q !== p && !q.userData.robbed && Math.random() < 0.3) { const [l, r2] = q.userData.arms; l.rotation.set(-2.6, 0, -0.4); r2.rotation.set(-2.6, 0, 0.4); }
-  addHeat(0.9);
+  // (somebody in the car makes the call; it takes a few stops' worth of seconds)
+  reportCrime(S.x, S.z, 0.9, false, { caller: 'anyone', t: 10, outside: true });
 }
 function disposePeople(grp) { if (!grp) return; if (grp.parent) grp.parent.remove(grp); grp.traverse((o) => o.geometry && o.geometry.dispose()); }
 let carPeople = null, platPeople = null;

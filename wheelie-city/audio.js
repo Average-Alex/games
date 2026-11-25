@@ -225,11 +225,13 @@ const sfx = (() => {
     engine.post({ rpm: S.rpm || 0, thr: live ? S.thr : 0, speed: v, on: bikeOn ? 1 : 0, lim: S.limiter ? 1 : 0 });
     // the car you're driving (drive.js works out its revs and gear)
     const drv = play && onFoot && FOOT.car && DRIVE.hp > 0;
-    if (drv) {
-      const f = DRIVE.rpm / 60 * 4, thr = DRIVE.thr;   // a V8 fires four times a revolution
+    // (a helicopter or plane uses the same voice: the rotor's thump, or the prop engine's drone; air.js sets AIR.snd)
+    const flying = play && onFoot && !!FOOT.air && typeof AIR !== 'undefined';
+    if (drv || flying) {
+      const f = flying ? AIR.snd.f : DRIVE.rpm / 60 * 4, thr = flying ? AIR.snd.thr : DRIVE.thr;   // a V8 fires four times a revolution
       carO1.frequency.setTargetAtTime(f, t, 0.03); carO2.frequency.setTargetAtTime(f * 1.012, t, 0.03); carSub.frequency.setTargetAtTime(f / 2, t, 0.03);
-      carF.frequency.setTargetAtTime(260 + thr * 1500 + DRIVE.rpm * 0.12, t, 0.05);
-      carG.gain.setTargetAtTime(0.07 + thr * 0.13, t, 0.05);
+      carF.frequency.setTargetAtTime(flying ? 180 + thr * 900 : 260 + thr * 1500 + DRIVE.rpm * 0.12, t, 0.05);
+      carG.gain.setTargetAtTime(flying ? 0.05 + thr * 0.16 : 0.07 + thr * 0.13, t, 0.05);
     } else carG.gain.setTargetAtTime(0, t, 0.15);
     carRoadG.gain.setTargetAtTime(play && onFoot && FOOT.car ? Math.min(0.35, Math.abs(DRIVE.v) * 0.012) : 0, t, 0.15);
     engineGain.gain.setTargetAtTime(bikeOn ? 0.9 : 0, t, 0.2);

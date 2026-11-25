@@ -42,7 +42,7 @@ const CITIES = {
     blurb: 'Rain on glass towers. Real streets from Kits to Metrotown; take Hwy 1 or a bridge to the next city.', swatch: 'linear-gradient(180deg,#56646f,#8a9aa3 60%,#3f5a52)',
     skyTop: '#3f72ad', skyMid: '#a6c6dd', fog: '#bccdd8', fogNear: 70, fogFar: 520, sun: '#fff2d8', night: false,
     hemi: ['#dfe8ee', '#3d4a44', 0.95], dir: ['#fff0dc', 0.95], sunDir: [0.35, 0.45, 0.6],
-    wx: { clear: 0.55, cloudy: 0.25, rain: 0.15, fog: 0.05 }, brick: 0.2,
+    wx: { clear: 0.3, cloudy: 0.3, rain: 0.32, fog: 0.08 }, brick: 0.2,
     land: { none: '#6e716c', yard: '#5f6e4f', grass: '#55703f', forest: '#344a30', sand: '#b8ab8a', paved: '#7a7c7c', water: '#33505e' },
     road: '#34373b', concrete: '#5a5d60', walk: '#8f9496', path: '#9a9488',
     walls: { house: ['#d8d2c4', '#a9b5b8', '#6f7f86', '#c2b39b', '#e4e0d6', '#8d6e5a', '#53626b'], mid: ['#b9c3c6', '#8a959a', '#c8bfae', '#a59a8c', '#d5d3cc'], glass: ['#7fa3a8', '#5f8a96', '#9cb8bd', '#6c8f99', '#8fb0b8', '#4f6f7a'] },
@@ -52,11 +52,10 @@ const CITIES = {
   },
   la: {
     name: 'Los Angeles', region: 'Hollywood · Downtown · Beverly Hills · Santa Monica · Venice',
-    blurb: 'Sunny afternoon. Palms, stucco and the 101, 10 and 110 freeways.', swatch: 'linear-gradient(180deg,#4f86c6,#a9cbe8 60%,#e9dcc4)',
-    // (a clear afternoon: blue sky, the sun well up, hard shadows; it used to be golden hour)
-    skyTop: '#3f7cc0', skyMid: '#a9cbe8', fog: '#cfdbe6', fogNear: 90, fogFar: 480, sun: '#fff1dc', sunDir: [0.45, 0.65, 0.6], night: false,
-    wx: { clear: 0.8, cloudy: 0.14, fog: 0.06 }, brick: 0.08,
-    hemi: ['#e4ecf6', '#6e6656', 0.9], dir: ['#fff0d8', 1.25],
+    blurb: 'Golden hour. Palms, stucco and the 101, 10 and 110 freeways.', swatch: 'linear-gradient(180deg,#3b4a8c,#f08a5d 60%,#f6c08a)',
+    skyTop: '#33417f', skyMid: '#e9845f', fog: '#f1b07c', fogNear: 90, fogFar: 480, sun: '#ffd7a6', sunDir: [0.25, 0.14, 1], night: false,
+    wx: { clear: 0.72, cloudy: 0.18, fog: 0.1 }, brick: 0.08,
+    hemi: ['#ffd9b8', '#6a5444', 0.85], dir: ['#ffc58f', 1.05],
     land: { none: '#6e7158', yard: '#5f7340', grass: '#56762f', forest: '#435a2c', sand: '#b8aa86', paved: '#858278', water: '#3f7f9e' },
     road: '#403f3c', concrete: '#9a9a96', walk: '#c4c8c8', path: '#bdb29a',
     walls: { house: ['#ead8bb', '#dcbb9b', '#f2e4cb', '#c9ab8c', '#e7cfc0', '#f4efe6', '#b98c6e'], mid: ['#ead8bb', '#d9c3a5', '#cfc6bb', '#e3d5c2'], glass: ['#6e8ba3', '#8aa3b5', '#5a7690', '#a0b4c2'] },
@@ -66,13 +65,12 @@ const CITIES = {
   },
   vegas: {
     name: 'Las Vegas', region: 'The Strip · Downtown · Paradise · Chinatown',
-    // (a blazing desert day; it used to be night)
-    blurb: 'Desert sun on the Strip. Ride Las Vegas Blvd, jump on I-15, hit Fremont St.', swatch: 'linear-gradient(180deg,#3f86d0,#a9d0ee 60%,#e8cf9e)',
-    skyTop: '#3f86d0', skyMid: '#a9d0ee', fog: '#d8e2e8', fogNear: 90, fogFar: 520, sun: '#fff4e0', sunDir: [-0.4, 0.75, 0.6], night: false,
-    wx: { clear: 0.9, cloudy: 0.07, rain: 0.03 }, brick: 0.03,
-    hemi: ['#eaf0f8', '#8a7a62', 0.92], dir: ['#fff3e0', 1.3],
-    land: { none: '#9a8a70', yard: '#7a7a52', grass: '#5e7a34', forest: '#4a5a30', sand: '#c8b08a', paved: '#9a948a', water: '#3a7fae' },
-    road: '#423f3c', concrete: '#a29e96', walk: '#cccac2', path: '#c2b08e',
+    blurb: 'Neon after midnight. Ride the Strip, jump on I-15, hit Fremont St.', swatch: 'linear-gradient(180deg,#0b0820,#3a1450 60%,#ff3d7f)',
+    skyTop: '#07061a', skyMid: '#2a1240', fog: '#2b1640', fogNear: 70, fogFar: 460, sun: '#f4eedd', sunDir: [-0.4, 0.35, 1], night: true,
+    wx: { clear: 0.9, cloudy: 0.06, rain: 0.04 }, brick: 0.03,
+    hemi: ['#8a72c8', '#5a3a40', 1.05], dir: ['#c9c0ff', 0.32],
+    land: { none: '#4a3f40', yard: '#4b4a3c', grass: '#3c5a3e', forest: '#2f4532', sand: '#6a5a4a', paved: '#4f4848', water: '#1f3250' },
+    road: '#26252b', concrete: '#47454c', walk: '#5b5258', path: '#5f5650',
     walls: { house: ['#d9c3a5', '#c8b28f', '#e0d2bd', '#b9a38a'], mid: ['#e0c27a', '#c8c3d6', '#d9b7c9', '#9fa7b6'], glass: ['#7d6aa8', '#c9a14a', '#8a93a8', '#b07a9e', '#5e7fb0'] },
     trees: 'palms', streetTrees: true, backdrop: 'desert', traffic: 30, cars: ['#f2f2f2', '#121214', '#b3262e', '#d6b25e', '#5b2d8a', '#2a6cb3', '#9aa1a8'],
     cop: { body: '#f4f4f2', panel: '#141518', stripe: '#1c5e3a', text: 'POLICE' }, neon: true,
@@ -93,13 +91,12 @@ const CITIES = {
   },
   nyc: {
     name: 'New York', region: 'Manhattan · Brooklyn · Queens · Jersey City · Hoboken',
-    // (a clear midday; it used to be dusk)
-    blurb: 'Canyons of steel in the midday sun. Take the FDR, cross the Williamsburg Bridge.', swatch: 'linear-gradient(180deg,#3f7cc0,#a9c8e2 60%,#b8a48e)',
-    skyTop: '#3f7cc0', skyMid: '#a9c8e2', fog: '#c8d4de', fogNear: 70, fogFar: 460, sun: '#fff2dc', sunDir: [0.4, 0.7, 0.6], night: false,
-    wx: { clear: 0.6, cloudy: 0.25, rain: 0.12, fog: 0.03 }, brick: 0.55,
-    hemi: ['#e2eaf4', '#5a5248', 0.9], dir: ['#fff0d8', 1.2],
-    land: { none: '#6a6a60', yard: '#5b6e45', grass: '#56763a', forest: '#3d5a30', sand: '#b0a48a', paved: '#7a7872', water: '#3a5f78' },
-    road: '#3c3b3a', concrete: '#8a8a8a', walk: '#b2b8bc', path: '#a8a090',
+    blurb: 'Canyons of steel at dusk. Take the FDR, cross the Williamsburg Bridge.', swatch: 'linear-gradient(180deg,#1f2840,#6f6f86 60%,#ffb36b)',
+    skyTop: '#1e263d', skyMid: '#6c6b84', fog: '#7a7787', fogNear: 60, fogFar: 430, sun: '#ffcf96', sunDir: [0, 0.08, 1], night: false, dusk: true,
+    wx: { clear: 0.45, cloudy: 0.3, rain: 0.2, fog: 0.05 }, brick: 0.55,
+    hemi: ['#b9b6c9', '#3a3433', 0.8], dir: ['#ffb985', 0.65],
+    land: { none: '#5a5856', yard: '#5b6649', grass: '#566e42', forest: '#3d5234', sand: '#a89c84', paved: '#64615e', water: '#2f4652' },
+    road: '#303034', concrete: '#6a6866', walk: '#8a8a88', path: '#8c8478',
     walls: { house: ['#8c5a46', '#a0806a', '#7a4a3a', '#b8a48e', '#6f6a66'], mid: ['#8c7f73', '#6f6a66', '#a39484', '#9a6a52', '#b0a495'], glass: ['#5c6f80', '#6f8090', '#4a5866', '#8a96a0', '#3e4a55'] },
     trees: 'deciduous', backdrop: 'none', traffic: 34, cars: ['#f2c230', '#f2c230', '#f2c230', '#1f2226', '#9aa1a8', '#e8e4dc', '#2d4f7a'], taxi: true,
     cop: { body: '#f4f4f2', panel: '#f4f4f2', stripe: '#1d3d8f', text: 'NYPD' },
@@ -296,13 +293,13 @@ const GradeShader = {
     '  gl_FragColor = vec4(clamp(c.rgb, 0.0, 1.0), c.a);',
     '}'].join('\n'),
 };
-// Per-city grade, all sunny daytime: cool in Vancouver, warm in LA, hot and bleached in Vegas, pastel in Miami, steely in NYC
+// Per-city grade: cool and moody in Vancouver, golden in LA, neon in Vegas, bright pastel in Miami, steely at dusk in NYC
 const GRADE = {
   van: { shadowTint: '#1d3a50', lightTint: '#ffe6c8', split: 0.12, saturation: 1.12, contrast: 1.1, warmth: 0.01 },
-  la: { shadowTint: '#24385a', lightTint: '#ffe4bc', split: 0.12, saturation: 1.14, contrast: 1.1, warmth: 0.02 },
-  vegas: { shadowTint: '#26365a', lightTint: '#ffe2b8', split: 0.12, saturation: 1.12, contrast: 1.1, warmth: 0.03 },
+  la: { shadowTint: '#2a2a55', lightTint: '#ffc98a', split: 0.18, saturation: 1.16, contrast: 1.1, warmth: 0.03 },
+  vegas: { shadowTint: '#1e1a4a', lightTint: '#ffb0d8', split: 0.16, saturation: 1.22, contrast: 1.12, warmth: 0.0 },
   miami: { shadowTint: '#17465a', lightTint: '#ffe0b0', split: 0.14, saturation: 1.2, contrast: 1.09, warmth: 0.02 },
-  nyc: { shadowTint: '#1d2a44', lightTint: '#ffe6c4', split: 0.12, saturation: 1.1, contrast: 1.1, warmth: 0.01 },
+  nyc: { shadowTint: '#1d2a44', lightTint: '#ffc48f', split: 0.16, saturation: 1.08, contrast: 1.12, warmth: 0.02 },
 };
 let gradePass = null;
 let composer = null, bloomPass = null, fxaaPass = null;
@@ -476,7 +473,7 @@ class GeoBuf {
 // the city's sun bearing so streets keep the light they were designed with.
 const SKY = { img: {}, meta: null, horizon: {}, rot: 0, ready: false };
 const SUN = new THREE.Vector3(0.45, 0.55, 0.7).normalize();
-const SKY_FOR = { van: 'clear_van', la: 'day_la', vegas: 'day_vegas', miami: 'clear_miami', nyc: 'day_nyc' };
+const SKY_FOR = { van: 'clear_van', la: 'sunset_la', vegas: 'night_vegas', miami: 'clear_miami', nyc: 'dusk_nyc' };
 const skyMat = new THREE.ShaderMaterial({
   uniforms: {
     tBase: { value: null }, tCloud: { value: null }, tStorm: { value: null }, tMist: { value: null },
@@ -539,8 +536,8 @@ ground.position.y = -0.25; scene.add(ground);
 const backdrop = new THREE.Group(); scene.add(backdrop);
 let rain = null;
 // How far you can see (FogExp2 density) in clear air, per city: Vancouver's air is clean, LA's hazy
-const SKY_GAIN = { van: 1, la: 1, vegas: 1, miami: 1, nyc: 1 };
-const VIS = { van: 0.00016, la: 0.00019, vegas: 0.00014, miami: 0.00017, nyc: 0.0002 };
+const SKY_GAIN = { van: 1, la: 0.92, vegas: 0.13, miami: 1, nyc: 0.5 };
+const VIS = { van: 0.00016, la: 0.00026, vegas: 0.0002, miami: 0.00017, nyc: 0.00024 };
 
 // load the city's skies (and the shared weather skies) as images; average each one's horizon for the haze colour
 function loadSkies(key) {

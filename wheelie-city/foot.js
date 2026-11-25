@@ -156,8 +156,12 @@ function footKey(code) {
   if (FOOT.downT > 0) return true;
   if (code === 'KeyF') {
     if (FOOT.car) { leaveCar(); return true; }
+    if (FOOT.air) { leaveAir(); return true; }
     if (FOOT.store) { popup('Leave the store first (walk out the door)'); return true; }
-    // whatever's closest: your bike, a bike or scooter on the street, or a car
+    // whatever's closest: an aircraft, your bike, a bike or scooter on the street, or a car
+    const plane = aircraftNear();
+    if (plane) { boardAir(plane); return true; }
+    if (FOOT.roof) { popup('Nothing to ride up here'); return true; }
     const bikeD = Math.hypot(FOOT.x - FOOT.park.x, FOOT.z - FOOT.park.z), ride = rideableNear(), car = carToTake();
     if (bikeD < 2.6) hopOn();
     else if (ride) takeRideable(ride);
@@ -166,7 +170,9 @@ function footKey(code) {
     return true;
   }
   if (code === 'KeyT') { openMarket(); return true; }                 // (the online market works from the driver's seat too)
-  if (FOOT.car) return code === 'KeyE' || code.startsWith('Digit');   // (no fighting from the driver's seat)
+  if (FOOT.car || FOOT.air) return code === 'KeyE' || code.startsWith('Digit');   // (no fighting from the driver's seat)
+  // on a roof: E takes the elevator back down (levels.js)
+  if (FOOT.roof && code === 'KeyE' && !aircraftNear() && FOOT.roof.tower) { roofToElevator(); return true; }
   if (code === 'Digit1') { FOOT.weapon = 'fists'; return true; }
   if (code === 'Digit2') { if (FOOT.has.knife) FOOT.weapon = 'knife'; else popup('No knife: buy one in a store'); return true; }
   for (const slot of [3, 4, 5]) if (code === 'Digit' + slot) {
@@ -181,6 +187,7 @@ function footKey(code) {
   return false;
 }
 function footMouse(dx, dy) {
+  if (FOOT.air) { AIR.mx += dx; AIR.my += dy; return; }        // flying: the mouse steers (air.js)
   const k = 0.0025 * sens;
   // the mouse turns you and the camera together (aiming, only the camera; you follow it)
   FOOT.camYaw -= dx * k; if (!(FOOT.aiming && isGun(FOOT.weapon))) FOOT.yaw -= dx * k;
@@ -202,6 +209,8 @@ function reload() {
 const FOOT_R = 0.32;      // body radius for walls and poles
 function footBlocked(x, z) {
   if (FOOT.store) return storeBlocked(x, z);
+  // on a roof: free to walk about, but not off the edge
+  if (FOOT.roof) { const b = FOOT.roof.bi; return [[0, 0], [0.4, 0], [-0.4, 0], [0, 0.4], [0, -0.4]].some(([a, c]) => !insideBuilding(b, x + a, z + c, 0)); }
   return buildingAt(x, z, FOOT_R) >= 0 || !!hitAt(x, z, FOOT_R - 0.15) || landAt(x, z) === 1 && !roadQuery(x, z, 6).in;
 }
 function footStep(d) {
@@ -215,6 +224,7 @@ function footStep(d) {
     syncPlayerState(); return;
   }
   if (F.car) { driveStep(d); syncPlayerState(); return; }
+  if (F.air) { airStep(d); if (F.air) syncPlayerState(); return; }
   // movement, relative to where the camera looks
   const fw = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0), st = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0);
   const sprint = keys.has('ShiftLeft') || keys.has('ShiftRight');
@@ -244,7 +254,8 @@ function footStep(d) {
   else if (!footBlocked(nx, F.z)) F.x = nx;
   else if (!footBlocked(F.x, nz)) F.z = nz;
   else F.v *= 0.5;
-  if (!F.store) {
+  if (F.roof) F.y = F.roof.h;
+  else if (!F.store) {
     const q = roadQuery(F.x, F.z, 14), gy = q.in ? roadY(RC[MAP.eCls[q.e]].rank) : (q.e >= 0 && q.d < q.hw + 2.6 && RC[MAP.eCls[q.e]].walk) ? CURB : 0;
     F.y += (gy - F.y) * Math.min(1, d * 14);
   }
@@ -302,7 +313,7 @@ function footHurt(dmg, why, vx = 0, vz = 0) {
 function footRecover() {
   // wasted: back on your feet next to the bike, patched up, wanted level cleared
   FOOT.hp = 100; heat = 0; chaseMax = 0;
-  const P = FOOT.park; if (FOOT.store) clearRoom(); FOOT.store = null;
+  const P = FOOT.park; if (FOOT.store) clearRoom(); FOOT.store = null; FOOT.roof = null; FOOT.air = null;
   FOOT.x = P.x + 1; FOOT.z = P.z; personPlay(FOOT.fig, 'Idle_Loop', 0.2);
 }
 function busyAnim(name) { const fig = FOOT.fig; if (fig.actions[name]) { fig.cur = null; personPlay(fig, name, 0.08, 1.25); } }
@@ -353,7 +364,8 @@ function attack() {
     }
     for (const [p, dmg] of dmgTo) hitPerson(p, dmg, 'shot');
     if (F.store) roomPanic(); else panic(F.x, F.z, 70);
-    addHeat(copNear(140) || F.store ? 1.2 : 0.35);
+    // gunfire: a cop who hears it comes; otherwise it's up to whoever heard it to call
+    reportCrime(F.x, F.z, 1.2, true);
     return;
   }
   // melee: the nearest person in front of you, in reach
@@ -363,7 +375,8 @@ function attack() {
   const best = nearestPersonInFront(w.range + 0.4, true);
   if (best) {
     setTimeout(() => { if (best.on && !best.dead) { hitPerson(best, w.dmg, F.weapon); sfx.bodyHit(F.weapon === 'knife' ? 0.6 : 0.45); } }, 180);
-    if (F.store) { roomPanic(); addHeat(0.5); } else if (copNear(70)) addHeat(F.weapon === 'knife' ? 1.2 : 0.6); else addHeat(0.15);
+    if (F.store) roomPanic();
+    reportCrime(best.x, best.z, F.weapon === 'knife' ? 1.2 : 0.6, false);
   }
 }
 function nearestPersonInFront(maxD, any) {
@@ -471,7 +484,7 @@ function robPerson(p) {
   if (FOOT.store) p.cower = true;
   else setTimeout(() => { if (p.on && !p.dead) startFlee(p, FOOT.x, FOOT.z, 12); }, 1800);
   addCash(amt); popup(`Robbed +$${amt}`, 'good'); sfx.cash && sfx.cash();
-  addHeat(FOOT.store ? 0.5 : copNear(90) ? 1.2 : 0.45);
+  reportCrime(p.x, p.z, 1.0, false);
 }
 
 // ---------------------------------------------------------------- your bag of stolen goods
@@ -498,7 +511,7 @@ function roomAdd(geo, mat, x, y, z, solid) { const me = new THREE.Mesh(geo, mat)
 function clearRoom() {
   if (ROOM.g) { scene.remove(ROOM.g); for (const d of ROOM.disp) d.dispose && d.dispose(); }
   for (const p of ROOM.people) scene.remove(p.g);
-  Object.assign(ROOM, { g: null, solids: [], people: [], loot: [], shelves: [], spots: [], anim: [], disp: [], called: 0, alarm: false, box: { ...ROOM_BOX }, hold: null, guardT: 0, counter: { x: 4.2, z: 2.8 }, raidT: 0, raidNext: 0, raided: false, back: null, items: null });
+  Object.assign(ROOM, { g: null, solids: [], people: [], loot: [], shelves: [], spots: [], anim: [], disp: [], called: 0, alarm: false, box: { ...ROOM_BOX }, hold: null, guardT: 0, counter: { x: 4.2, z: 2.8 }, raidT: 0, raidNext: 0, raided: false, back: null, items: null, reported: false });
   if (typeof FCOPS !== 'undefined') for (const p of FCOPS.slice()) if (p.inRoom) removeFootCop(p);
   ROOM.door.z = ROOM.box.z0 + 0.4;
 }
@@ -662,7 +675,7 @@ function roomHurt(p, dmg, how) {
   p.hp -= dmg;
   bloodHit(p, STORE_Y, FOOT.x, FOOT.z, how);
   if (p.hp <= 0) {
-    p.dead = true; p.model.cur = null; personPlay(p.model, 'Death01', 0.06); addHeat(1.4);
+    p.dead = true; p.model.cur = null; personPlay(p.model, 'Death01', 0.06); roomCrime();
     setTimeout(() => bloodPool(p.x - Math.sin(p.yaw) * 0.7, STORE_Y, p.z - Math.cos(p.yaw) * 0.7), 900);
     return;
   }
@@ -726,7 +739,7 @@ function roomInteract() {
   if (l) {
     if (!takeItem(l.name, l.value)) return;
     l.mesh.visible = false; ROOM.loot.splice(ROOM.loot.indexOf(l), 1); lootedHomes.add(l.key);
-    if (ROOM.people.some((q) => !q.dead)) addHeat(0.25);
+    if (ROOM.people.some((q) => !q.dead && !q.cower)) roomCrime();
     return;
   }
   if (nearShelf()) {
@@ -735,7 +748,7 @@ function roomInteract() {
     const it = items[Math.floor(Math.random() * items.length)], v = Math.round(it[1] + Math.random() * (it[2] - it[1]));
     if (!takeItem(it[0], v)) return;
     const cashier = ROOM.people.find((q) => q.role === 'cashier' && !q.dead && !q.cower);
-    if (cashier && Math.random() < 0.4) { say(cashier, pick(Math.random, ['Hey! Put that back!', "I saw that!", "I'm calling the cops!"]), false); addHeat(0.9); }
+    if (cashier && Math.random() < 0.4) { say(cashier, pick(Math.random, ['Hey! Put that back!', "I saw that!", "I'm calling the cops!"]), false); roomCrime(); }
     return;
   }
   popup('Nothing to take here');
@@ -827,16 +840,29 @@ function updateRoom(d) {
     if (!keys.has('KeyE') || Math.hypot(FOOT.x - h.x, FOOT.z - h.z) > 2.2 || FOOT.downT > 0) { ROOM.hold = null; popup(`${h.label}: stopped`); }
     else { h.t += d; if (h.t >= h.T) { ROOM.hold = null; h.done(); } }
   }
-  // a home's family phones the police after a few seconds, unless nobody is left standing
+  // someone inside phones the police after a few seconds, unless nobody is left standing
   if (ROOM.called > 0) {
     ROOM.called -= d;
-    if (ROOM.called <= 0 && ROOM.people.some((p) => !p.dead)) { popup('They called the police', 'cop'); addHeat(Math.max(0.05, 2.05 - heat)); }
+    if (ROOM.called <= 0) {
+      if (ROOM.people.some((p) => !p.dead)) { ROOM.reported = true; popup('They called the police', 'cop'); addHeat(Math.max(0.05, 2.05 - heat)); }
+      else popup('Nobody left to call the police', 'good');
+    }
   }
+}
+// a crime indoors: the people in here (if there are any standing) start a call, once
+function roomCrime() {
+  if (ROOM.reported || ROOM.called > 0 || !ROOM.people.some((p) => !p.dead)) return;
+  if (ROOM.alarm) { ROOM.reported = true; addHeat(Math.max(0.05, 2.05 - heat)); return; }       // (an alarm goes straight to the police)
+  ROOM.called = 6 + Math.random() * 3;
+  const p = ROOM.people.find((q) => !q.dead);
+  if (p) say(p, pick(Math.random, CALL_LINES), false);
+  popup('Someone in here is calling the police: stop them, or get out', 'cop');
 }
 
 // ---------------------------------------------------------------- camera on foot
 function footCamera(dt) {
   if (FOOT.car) { driveCamera(dt); return; }
+  if (FOOT.air) { airCamera(dt); return; }
   const F = FOOT, aimed = F.aiming && isGun(F.weapon);
   // not aiming, the camera swings round behind you as you turn
   if (!aimed) F.camYaw += wrapPi(F.yaw - F.camYaw) * Math.min(1, dt * 7);
@@ -847,7 +873,7 @@ function footCamera(dt) {
   let dist = back;
   for (let k = 0.4; k <= back; k += 0.3) {
     const px = head.x - fx * k * cy, pz = head.z - fz * k * cy;
-    if (F.store ? (px < ROOM.box.x0 + 0.2 || px > ROOM.box.x1 - 0.2 || pz > ROOM.box.z1 - 0.2 || pz < ROOM.box.z0 + 0.25) : buildingAt(px, pz, 0.2) >= 0) { dist = Math.max(0.5, k - 0.3); break; }
+    if (F.store ? (px < ROOM.box.x0 + 0.2 || px > ROOM.box.x1 - 0.2 || pz > ROOM.box.z1 - 0.2 || pz < ROOM.box.z0 + 0.25) : F.roof ? false : buildingAt(px, pz, 0.2) >= 0) { dist = Math.max(0.5, k - 0.3); break; }
   }
   const want = tmp2.set(head.x - fx * dist * cy, head.y + dist * sy, head.z - fz * dist * cy);
   if (camSnap) camPos.copy(want); else camPos.lerp(want, 1 - Math.exp(-dt * 14));
@@ -887,6 +913,7 @@ function footFrame(dt = 1 / 60) {
   bleedStep(peds, dt, (p) => p.g.position.y || 0);
   if (FOOT.store) bleedStep(ROOM.people, dt, () => STORE_Y);
   updateFootCops(dt);
+  if (typeof updateParkedAir === 'function') updateParkedAir();
   if (!FOOT.on) { updateFootHud(); setKeyBubble(); return; }
   let kb = null;
   const V = (x, y, z) => new THREE.Vector3(x, y, z);
@@ -905,6 +932,14 @@ function footFrame(dt = 1 / 60) {
     }
   } else if (FOOT.car) {
     if (Math.abs(DRIVE.v) < 6) kb = ['F', 'Get out', V(FOOT.car.x, 2.4, FOOT.car.z)];
+  } else if (FOOT.air) {
+    const a = FOOT.air;
+    if (a.ground && Math.hypot(a.vx || 0, a.vz || 0) < 2) kb = ['F', 'Get out', V(a.x, a.y + 3.4, a.z)];
+  } else if (!FOOT.menu && (FOOT.roof || aircraftNear())) {
+    // up on a roof, or by an aircraft
+    const ac = aircraftNear();
+    if (ac) kb = ['F', ac.kind === 'heli' ? 'Steal the helicopter' : 'Steal the plane', V(ac.x, ac.y + 3.6, ac.z)];
+    else if (FOOT.roof && FOOT.roof.tower) kb = ['E', 'Elevator down', V(FOOT.x, FOOT.y + 2, FOOT.z)];
   } else if (!FOOT.menu) {
     const p = nearestPedInFront(2.2), b = !p && buildingInFront(), fx = Math.sin(FOOT.yaw), fz = Math.cos(FOOT.yaw);
     const bikeD = FOOT.park ? Math.hypot(FOOT.x - FOOT.park.x, FOOT.z - FOOT.park.z) : 99, ride = rideableNear(), car = !ride && carToTake();

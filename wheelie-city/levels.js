@@ -46,13 +46,35 @@ function elevatorMenu(b, cur) {
     e.onclick = () => { closeStoreMenu(); rideElevator(b, f); }; grid.appendChild(e);
   };
   btn('L', 0); for (let f = 2; f <= b.floors; f++) btn(String(f), f);
+  if (towerHelipad(b)) btn('Roof 🚁', 'roof');
   storeMenu.appendChild(grid);
   const c = document.createElement('button'); c.type = 'button'; c.innerHTML = '<span>Stay here</span><span>E</span>'; c.onclick = closeStoreMenu; storeMenu.appendChild(c);
   storeMenu.hidden = false;
   if (document.pointerLockElement) document.exitPointerLock();
 }
+// some of the taller towers have a helipad on the roof, with a helicopter on it (air.js)
+function towerHelipad(b) { return b.floors >= 10 && mulberry(b.bi * 53 + 7)() < 0.45; }
+function goRoof(b) {
+  const keep = FOOT.store;
+  clearRoom(); FOOT.store = null;
+  const rec = roofHeli(b.bi);
+  // out of the roof access, a few metres from the pad
+  const ok = (x, z) => [[0, 0], [0.5, 0], [-0.5, 0], [0, 0.5], [0, -0.5]].every(([a, c]) => insideBuilding(b.bi, x + a, z + c, 0));
+  let x = rec.x, z = rec.z + 0.1;
+  for (let r = 10; r >= 4; r -= 1) { let found = false; for (let k = 0; k < 16; k++) { const an = k / 16 * Math.PI * 2, px = rec.x + Math.sin(an) * r, pz = rec.z + Math.cos(an) * r; if (ok(px, pz)) { x = px; z = pz; found = true; break; } } if (found) break; }
+  FOOT.x = x; FOOT.z = z; FOOT.y = rec.y; FOOT.roof = { bi: b.bi, h: rec.y, tower: b, store: keep };
+  FOOT.yaw = Math.atan2(rec.x - x, rec.z - z); FOOT.camYaw = FOOT.yaw; FOOT.v = 0; camSnap = true;
+  sfx.pop && sfx.pop();
+  popup(`${b.name} · roof · F by the helicopter to take it, E for the elevator`);
+}
+function roofToElevator() {
+  const R = FOOT.roof; FOOT.roof = null; FOOT.store = R.store;
+  goLevel(() => buildLobby(R.tower), { x: -1.8, z: 6.4, yaw: Math.PI });
+  popup('Lobby');
+}
 function rideElevator(b, f) {
   sfx.pop && sfx.pop(); setTimeout(() => sfx.pop && sfx.pop(), 160);
+  if (f === 'roof') { goRoof(b); return; }
   popup(f ? `Floor ${f}` : 'Lobby');
   if (!f) goLevel(() => buildLobby(b), { x: -1.8, z: 6.4, yaw: Math.PI });
   else goLevel(() => buildHall(b, f), null, () => { FOOT.z = ROOM.box.z0 + 1.1; FOOT.yaw = 0; elevatorMenu(b, f); });

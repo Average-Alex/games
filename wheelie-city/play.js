@@ -188,6 +188,7 @@ function placeOnRoad(x, z, heading, v, allowHwy) {
 function resetWorld() {
   if (FOOT.on) { if (FOOT.store) leaveStore(); hopOn(); }
   if (typeof clearFootCops === 'function') clearFootCops();
+  if (typeof CALLS !== 'undefined') { for (const c of CALLS) if (c.p) c.p.calling = false; CALLS.length = 0; }
   clearTiles();
   for (const u of units) deactivate(u);
   if (heli) { heli.on = false; heli.g.visible = false; heli.beam.visible = false; heli.spot.intensity = 0; }
@@ -929,7 +930,7 @@ function offense(amount) { if (copNear(70)) addHeat(amount, false); }
 function addHeat(amount) {
   const before = stars();
   // a heads-up before the first star, so it never comes out of nowhere
-  if (heat < 0.4 && heat + amount >= 0.4 && before === 0) popup('A cop saw that · calm down or you’ll get a star', 'cop');
+  if (heat < 0.4 && heat + amount >= 0.4 && before === 0) popup('The police know · calm down or you’ll get a star', 'cop');
   heat = Math.min(5.99, heat + amount);
   unseenT = 0;
   if (stars() > before) {
@@ -1444,7 +1445,7 @@ function updateHUD(dt) {
   // the dial speedo (drive.js): on any bike or scooter, and in cars; not on foot or on the train
   if (typeof speedo !== 'undefined') {
     const bike = !FOOT.on && !WALK.on && !RIDE.on;
-    speedo.hidden = !(bike || FOOT.car);
+    speedo.hidden = !(bike || FOOT.car || FOOT.air);
     if (bike) updateBikeSpeedo(B);
   }
   hudT += dt; if (hudT < 0.12) return; hudT = 0;
