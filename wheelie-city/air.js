@@ -8,7 +8,8 @@
 //   Take off at ~130 km/h with the nose up; land gently, wings level. Hit a building or the ground hard and it's over.
 
 const AIR = { mx: 0, my: 0, snd: { f: 0, thr: 0 } };
-const AIRCRAFT = [];                 // parked or flying: { kind, x, y, z, yaw, g, body, rotor, tail, prop, site, hp }
+const AIRCRAFT = [];
+const PADS = [];                     // real helipads (with or without a helicopter): { x, y, z, bi (building, roof pads) }                 // parked or flying: { kind, x, y, z, yaw, g, body, rotor, tail, prop, site, hp }
 const AIR_SITES = {
   van: [{ name: 'YVR', lat: 49.1950, lon: -123.1790, planes: 4, helis: 2 }],
   la: [{ name: 'Santa Monica Airport', lat: 34.0158, lon: -118.4513, planes: 4, helis: 1 }],
@@ -19,7 +20,7 @@ const AIR_SITES = {
 // lat/lon to the map's metres (x west, z north: the same projection the map builder uses)
 function geoToMap(lat, lon) {
   const [lat0, lon0] = MAP.meta.center;
-  return [-(lon - lon0) * 111320 * Math.cos(lat0 * Math.PI / 180), (lat - lat0) * 110574];
+  return [-(lon - lon0) * 111320 * Math.cos(lat0 * Math.PI / 180), (lat - lat0) * 110540];
 }
 
 // ---------------------------------------------------------------- models
@@ -83,10 +84,59 @@ function airModel(rec) {
 function dropModel(rec) { if (!rec.g) return; scene.remove(rec.g); rec.g = rec.body = rec.rotor = rec.tail = rec.prop = null; }
 
 // ---------------------------------------------------------------- where they're parked
-let airSitesFor = null;
+let airSitesFor = null, AIRDATA = null;
+// The real places, from OpenStreetMap (tools/extract_air.py -> maps/air_<city>.json): planes on the aprons of real
+// airfields and one ready at the end of each runway; a helicopter on some of the real helipads and heliports, on the
+// roof where the helipad is on a building. Only where there really is one.
 function setupAirSites() {
-  for (const r of AIRCRAFT) dropModel(r);
-  AIRCRAFT.length = 0; airSitesFor = MAP.key;
+  for (const r of AIRCRAFT) { dropModel(r); if (r.pad) scene.remove(r.pad); }
+  for (const p of PADS) if (p.pad) scene.remove(p.pad);
+  AIRCRAFT.length = 0; PADS.length = 0; airSitesFor = MAP.key; AIRDATA = null;
+  const key = MAP.key;
+  fetch(`wheelie-city/maps/air_${key}.json?v=1124b`).then((r) => r.ok ? r.json() : null).catch(() => null).then((data) => {
+    if (!data || !MAP || MAP.key !== key) { if (!data && MAP && MAP.key === key) setupAirSitesGuess(); return; }
+    AIRDATA = data; placeRealAircraft(data);
+  });
+}
+const airHash = (x, z, s) => { const v = Math.sin(x * 12.9898 + z * 78.233 + s * 37.719) * 43758.5453; return v - Math.floor(v); };
+function placeRealAircraft(data) {
+  const clear = (x, z, r) => buildingAt(x, z, r) < 0 && landAt(x, z) !== 1 && !hitAt(x, z, r);
+  // a plane ready at one end of every proper runway (long enough for a light plane), facing down it
+  for (const rw of data.runways) {
+    const [ax, az] = rw.a, [bx, bz] = rw.b, L = Math.hypot(bx - ax, bz - az);
+    if (L < 500) continue;
+    const dx = (bx - ax) / L, dz = (bz - az) / L, x = ax + dx * 70, z = az + dz * 70;
+    if (clear(x, z, 6)) AIRCRAFT.push({ kind: 'plane', x, y: 0, z, yaw: Math.atan2(dx, dz), site: 'runway ' + (rw.ref || ''), hp: 100 });
+  }
+  // parked on the aprons near runways (not every apron: cargo and maintenance aprons stay empty)
+  const runwayNear = (x, z) => data.runways.some((rw) => { const [ax, az] = rw.a, [bx, bz] = rw.b, dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1, t = clamp(((x - ax) * dx + (z - az) * dz) / L2, 0, 1); return Math.hypot(x - ax - dx * t, z - az - dz * t) < 1500; });
+  let parked = 0;
+  for (const ap of data.aprons) {
+    const [cx, cz] = ap.c;
+    if (!runwayNear(cx, cz) || parked >= 10) continue;
+    // points inside the apron, 28 m apart
+    const xs = ap.pts.map((p) => p[0]), zs = ap.pts.map((p) => p[1]);
+    const inside = (x, z) => { let c = false; for (let i = 0, j = ap.pts.length - 1; i < ap.pts.length; j = i++) { const [xi, zi] = ap.pts[i], [xj, zj] = ap.pts[j]; if ((zi > z) !== (zj > z) && x < (xj - xi) * (z - zi) / (zj - zi) + xi) c = !c; } return c; };
+    let here = 0;
+    for (let x = Math.min(...xs) + 14; x < Math.max(...xs) - 14 && here < 3; x += 28)
+      for (let z = Math.min(...zs) + 14; z < Math.max(...zs) - 14 && here < 3; z += 28) {
+        if (!inside(x, z) || !clear(x, z, 7) || airHash(x, z, 1) > 0.5) continue;
+        if (AIRCRAFT.some((r) => Math.hypot(r.x - x, r.z - z) < 24)) continue;
+        AIRCRAFT.push({ kind: 'plane', x, y: 0, z, yaw: airHash(x, z, 2) * Math.PI * 2, site: 'apron', hp: 100 }); here++; parked++;
+      }
+  }
+  // helicopters: on about half the real helipads (on the roof if the pad's on a building)
+  for (const hp of data.helipads) {
+    const bi = buildingAt(hp.x, hp.z, 0);
+    const onRoof = bi >= 0;
+    if (!onRoof && !clear(hp.x, hp.z, 5)) continue;
+    const y = onRoof ? MAP.bH[bi] : 0, occupied = airHash(hp.x, hp.z, 3) < (hp.kind === 'heliport' ? 0.85 : 0.5);
+    PADS.push({ x: hp.x, y, z: hp.z, bi: onRoof ? bi : -1, name: hp.name });
+    if (occupied) AIRCRAFT.push({ kind: 'heli', x: hp.x, y, z: hp.z, yaw: airHash(hp.x, hp.z, 4) * Math.PI * 2, site: hp.name || 'helipad', roof: onRoof ? bi : undefined, hp: 100 });
+  }
+}
+// no data file: the old guess (by airport coordinates)
+function setupAirSitesGuess() {
   const clear = (x, z, r) => buildingAt(x, z, r) < 0 && landAt(x, z) !== 1 && !hitAt(x, z, r);
   for (const site of AIR_SITES[MAP.key] || []) {
     const [cx, cz] = geoToMap(site.lat, site.lon);
@@ -128,7 +178,18 @@ function setupAirSites() {
     for (const [x, z] of spots) AIRCRAFT.push({ kind: 'heli', x, y: 0, z, yaw: 0.6, site: site.name, hp: 100 });
   }
 }
-// a helipad on a tower's roof, with a helicopter on it (made when you come out on the roof)
+// the real helipad on a building's roof (from the map data), or null
+function roofPadOf(bi) { return PADS.find((p) => p.bi === bi) || null; }
+// the pad: a painted circle with an H (made for every helipad near you, with or without a helicopter on it)
+function padDecal(rec) {
+  if (rec.pad) return;
+  const cv = document.createElement('canvas'); cv.width = cv.height = 256; const c = cv.getContext('2d');
+  c.fillStyle = '#3a3c40'; c.beginPath(); c.arc(128, 128, 126, 0, Math.PI * 2); c.fill(); c.strokeStyle = '#f2c230'; c.lineWidth = 10; c.beginPath(); c.arc(128, 128, 110, 0, Math.PI * 2); c.stroke();
+  c.fillStyle = '#ffffff'; c.font = '900 150px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('H', 128, 136);
+  const pad = new THREE.Mesh(new THREE.CircleGeometry(7, 32).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: new THREE.CanvasTexture(cv), roughness: 0.9, transparent: true }));
+  pad.position.set(rec.x, rec.y + 0.04, rec.z); scene.add(pad); rec.pad = pad;
+}
+// (old: a made-up rooftop pad at the centre of a tower; kept for maps without the data file)
 function roofHeli(bi) {
   const ex = AIRCRAFT.find((r) => r.roof === bi); if (ex) return ex;
   const m = MAP, o0 = m.bOff[bi], o1 = m.bOff[bi + 1];
@@ -147,6 +208,7 @@ function roofHeli(bi) {
 function updateParkedAir() {
   if (!MAP) return;
   if (airSitesFor !== MAP.key) setupAirSites();
+  for (const p of PADS) { const d = Math.hypot(p.x - S.x, p.z - S.z); if (!p.pad && d < 900) padDecal(p); else if (p.pad && d > 1100) { scene.remove(p.pad); p.pad.geometry.dispose(); p.pad = null; } }
   for (const r of AIRCRAFT) {
     const d = Math.hypot(r.x - S.x, r.z - S.z);
     if (!r.g && d < 900) airModel(r); else if (r.g && d > 1100 && r !== FOOT.air) dropModel(r);

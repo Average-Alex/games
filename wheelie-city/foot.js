@@ -413,7 +413,11 @@ function buildingInFront() {
   void key;
   if (m.bFlags[bi] & 1) return { type: 'store', name: 'Corner Store', kind: 'convenience', bi };
   // houses and apartments (and small unmarked buildings) are homes you can break into
-  if (k === 1 || k === 2 || (k === 0 && area < 500 && m.bH[bi] < 14)) return { type: 'home', name: k === 2 ? 'Apartment' : 'House', bi };
+  if (k === 1 || k === 2 || (k === 0 && area < 500 && m.bH[bi] < 14)) {
+    // how well off the family is (homes.js): a mansion is a mansion from the street
+    const tier = typeof homeWealth === 'function' ? Math.min(k === 2 ? 2 : 3, homeWealth(bi)) : 1;
+    return { type: 'home', name: k === 2 ? 'Apartment' : tier === 3 ? 'Mansion' : 'House', bi, tier };
+  }
   return null;
 }
 const shopInFront = () => { const b = buildingInFront(); return b && b.type === 'store' ? b : null; };
@@ -690,7 +694,7 @@ function roomPanic() {
 function enterRoom(b) {
   clearRoom();
   // malls and high-rises (levels.js) have more inside: shops off a concourse; a lobby, elevators, floors of apartments
-  if (b.type === 'mall') buildMall(b); else if (b.type === 'tower') buildLobby(b); else if (b.type === 'store') buildStoreRoom(b); else buildHomeRoom(b);
+  if (b.type === 'mall') buildMall(b); else if (b.type === 'tower') buildLobby(b); else if (b.type === 'store') buildStoreRoom(b); else if (typeof buildHouse === 'function') buildHouse(b, b.tier ?? 1); else buildHomeRoom(b);
   if (b.type !== 'mall' && mulberry(b.bi * 97 + 13)() < 0.5) mirrorRoom();          // half the buildings have the layout the other way round
   ROOM.door.z = ROOM.box.z0 + 0.4;
   const fx = Math.sin(FOOT.yaw), fz = Math.cos(FOOT.yaw);
@@ -706,8 +710,11 @@ function homeArrive(name) {
   popup(`Broke into the ${name.toLowerCase()} · E to take things, a weapon out to rob people`, 'bad');
   sfx.glass && sfx.glass(0.5);
   // the family screams; someone calls the police unless you deal with them fast
-  for (const p of ROOM.people) { p.cower = true; say(p, pick(Math.random, ['Who are you?!', 'Get out of our house!', 'Please, take anything!', "I'm calling 911!"]), false); }
+  for (const p of ROOM.people) { if (p.role === 'guard') continue; p.cower = true; say(p, pick(Math.random, ['Who are you?!', 'Get out of our house!', 'Please, take anything!', "I'm calling 911!"]), false); }
+  // a mansion has an alarm: it goes straight to the police, and security comes for you
+  if (ROOM.wealth === 3) { ROOM.alarm = true; popup('The alarm is going off · security is armed', 'cop'); roomCrime(); return; }
   ROOM.called = 8;
+  if (ROOM.wealth != null) popup(`A ${WEALTH_NAME[ROOM.wealth]} family`, '');
 }
 function leaveStore() {
   const D = FOOT.store.door, W = FOOT.store.wall; if (W) facadeDoor(W.x, FOOT.store.y || 0, W.z, W.yaw, false, 1.1);
@@ -738,7 +745,7 @@ function roomInteract() {
   const l = nearLoot();
   if (l) {
     if (!takeItem(l.name, l.value)) return;
-    l.mesh.visible = false; ROOM.loot.splice(ROOM.loot.indexOf(l), 1); lootedHomes.add(l.key);
+    l.mesh.visible = false; if (l.also) for (const m of l.also) m.visible = false; ROOM.loot.splice(ROOM.loot.indexOf(l), 1); lootedHomes.add(l.key);
     if (ROOM.people.some((q) => !q.dead && !q.cower)) roomCrime();
     return;
   }

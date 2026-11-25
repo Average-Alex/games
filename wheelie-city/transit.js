@@ -514,26 +514,26 @@ function makePerson(seed, pose) {
 // Robbing a passenger: look at someone near your seat and press E. They hand over their wallet or phone (hands up),
 // the car panics, and someone calls it in: you'll have a wanted level when you get off.
 const TRAIN_ROB_LINES = ['"Take it, just take it!"', '"Please, I don\'t want any trouble"', '"OK, OK! Here!"', '"Seriously?! On the train?"'];
-function passengerInView() {
-  if (!carPeople || RIDE.view !== 'seat') return null;
+function passengerInView(group = carPeople, maxD = 3.8) {
+  if (!group || (group === carPeople && RIDE.view !== 'seat' && RIDE.view !== 'walk')) return null;
   const dir = camera.getWorldDirection(new THREE.Vector3()), w = new THREE.Vector3();
   let best = null, bd = 0.9;
-  for (const p of carPeople.children) {
+  for (const p of group.children) {
     if (p.userData.robbed) continue;
     p.getWorldPosition(w); w.y += 0.9; w.sub(camera.position);
-    const L = w.length(); if (L > 3.8) continue;
+    const L = w.length(); if (L > maxD) continue;
     const dot = w.dot(dir) / L; if (dot > bd) { bd = dot; best = p; }
   }
   return best;
 }
-function robPassenger(p) {
+function robPassenger(p, group = carPeople) {
   p.userData.robbed = true;
   const [aL, aR] = p.userData.arms; aL.rotation.set(-2.8, 0, -0.35); aR.rotation.set(-2.8, 0, 0.35);    // hands up
   const amt = 15 + Math.floor(Math.random() * 140), what = Math.random() < 0.35 ? 'phone' : 'wallet';
   if (what === 'phone' && typeof takeItem === 'function' && takeItem('Phone', 60 + Math.floor(Math.random() * 160))) popup(pick(Math.random, TRAIN_ROB_LINES), '');
   else { addCash(amt); popup(`Robbed a passenger +$${amt} · ${pick(Math.random, TRAIN_ROB_LINES)}`, 'good'); sfx.cash && sfx.cash(); }
   // the rest of the car: some put their hands up too, and somebody's on the phone to transit police
-  for (const q of carPeople.children) if (q !== p && !q.userData.robbed && Math.random() < 0.3) { const [l, r2] = q.userData.arms; l.rotation.set(-2.6, 0, -0.4); r2.rotation.set(-2.6, 0, 0.4); }
+  for (const q of group.children) if (q !== p && !q.userData.robbed && Math.random() < 0.3) { const [l, r2] = q.userData.arms; l.rotation.set(-2.6, 0, -0.4); r2.rotation.set(-2.6, 0, 0.4); }
   // (somebody in the car makes the call; it takes a few stops' worth of seconds)
   reportCrime(S.x, S.z, 0.9, false, { caller: 'anyone', t: 10, outside: true });
 }
@@ -590,8 +590,153 @@ function drawScreen(text) {
   screenTex.needsUpdate = true;
 }
 
+// ---------------------------------------------------------------- walking freely (past the gates, and on the train)
+// In the station, past the fare gates, you walk where you like: the paid side of the hall, up (or down) the
+// escalator, the landing and the whole platform, among the people waiting. Walk into an open train door to get on.
+// Back at the gates, E taps out and you walk out to the street. On the train you can stand up (W), walk the aisle and
+// the doorways, sit down again (E by a seat), rob anyone, and walk out of an open door at a stop.
+const between = (x, a, b) => x >= Math.min(a, b) && x <= Math.max(a, b);
+// where the doors of a train standing at this station are along the platform: [{ car, dz, u }] (open ones only)
+function openDoorsAt(F, t) {
+  if (!t || t.atSt !== F.st || t.dwell <= 0) return [];
+  const out = [];
+  for (let c = 0; c < t.cars.length; c++) {
+    if ((t.cars[c].userData.open || 0) < 0.9) continue;
+    const uc = t.dir * ((t.cars.length - 1) * CAR_PITCH / 2 - c * CAR_PITCH);
+    for (const dz of DOOR_Z) out.push({ car: c, dz, u: uc + t.dir * dz });
+  }
+  return out;
+}
+// the floor height at (u, v) in the station, or null if that's not somewhere you can stand
+function stationFloorY(F, u, v, doors) {
+  if (between(u, F.gateU + F.su * 0.9, F.eBot) && v >= HALL_V0 + 0.3 && v <= HALL_V1 - 0.3) return 0;
+  if (between(u, F.eBot, F.eTop) && v >= LANE_V0 + 0.2 && v <= LANE_V1 - 0.2) return F.escY(u);
+  if (between(u, F.eTop - F.su * 0.2, F.eTop + F.su * 4.3) && v >= PLAT_V1 - 0.1 && v <= LANE_V1 - 0.2) return F.yP;
+  if (Math.abs(u) <= PLAT_LEN / 2 - 1 && v >= PLAT_V0 + 0.3 && v <= PLAT_V1 - 0.25) return F.yP;
+  if (doors && v < PLAT_V0 + 0.4 && v > PLAT_V0 - 1.4 && doors.some((dd) => Math.abs(u - dd.u) < DOOR_W / 2 - 0.15)) return F.yP;
+  return null;
+}
+function enterFreeWalk(p) {
+  const F = WALK.F, dx = p.x - F.P.px, dz = p.z - F.P.pz;
+  // (a moment before E does anything here: the E you tapped in with mustn't tap you straight back out)
+  WALK.free = { u: dx * F.ux + dz * F.uz, v: dx * F.vx + dz * F.vz, y: p.y, escDir: F.su, eCd: 1.2 };
+  keys.delete('KeyE');
+  WALK.stage = 'free';
+  if (!platPeople) fillPlatform(F);
+  popup('Walk anywhere · E at the gates to tap out · walk into an open train door to get on', '');
+}
+// the camera's forward and right on the ground, as (u, v) in the station frame
+function walkAxes(F, yaw) {
+  const fx = -Math.sin(yaw), fz = -Math.cos(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw);
+  return { fu: fx * F.ux + fz * F.uz, fv: fx * F.vx + fz * F.vz, ru: rx * F.ux + rz * F.uz, rv: rx * F.vx + rz * F.vz };
+}
+function freeStationStep(d) {
+  const F = WALK.F, W2 = WALK.free, prompt = $('#prompt'), L = LIVERY[cityKey] || LIVERY.van;
+  const gate = STATION_GATES.get(stationKey(WALK.st));
+  if (gate) { gate.open += clamp(gate.want - gate.open, -d * 2.2, d * 3.2); for (const p of gate.pads) p.piv.rotation.y = p.closed + p.sgn * gate.open * 1.45; }
+  // the train: called once you're up on the platform; it waits with its doors open
+  const onPlatform = Math.abs(W2.y - F.yP) < 0.3 && W2.v < PLAT_V1;
+  if (onPlatform && !WALK.train) WALK.train = callTrain(WALK.st, WALK.dir);
+  const t = WALK.train;
+  if (t && t.atSt === WALK.st && t.dwell > 0) t.hold = true;
+  const doors = openDoorsAt(F, t);
+  // walk (Shift to hurry); the escalator carries you the way you're going
+  const fw = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0), st = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0);
+  const speed = keys.has('ShiftLeft') || keys.has('ShiftRight') ? 2.8 : 1.5, A = walkAxes(F, WALK.yaw);
+  let du = (A.fu * fw + A.ru * st) * speed * d, dv = (A.fv * fw + A.rv * st) * speed * d;
+  const onEsc = between(W2.u, F.eBot, F.eTop) && W2.v >= LANE_V0 && W2.v <= LANE_V1;
+  if (Math.abs(du) > 1e-4 && onEsc) W2.escDir = Math.sign(du);
+  if (onEsc) du += W2.escDir * 0.75 * d;
+  const tryMove = (nu, nv) => { const y = stationFloorY(F, nu, nv, doors); if (y === null) return false; W2.u = nu; W2.v = nv; W2.y = y; return true; };
+  if (!tryMove(W2.u + du, W2.v + dv)) { if (!tryMove(W2.u + du, W2.v)) tryMove(W2.u, W2.v + dv); }
+  WALK.bob += (fw || st) ? d * (speed / 1.5) : 0;
+  // into an open door: you're on the train
+  const inDoor = W2.v < PLAT_V0 - 0.8 && doors.find((dd) => Math.abs(W2.u - dd.u) < DOOR_W / 2);
+  if (inDoor) { boardFree(t, inDoor); prompt.hidden = true; return; }
+  // prompts, and E: tap out at the gates, or rob someone waiting
+  prompt.hidden = false;
+  const atGate = Math.abs(W2.u - (F.gateU + F.su * 1.6)) < 1.4 && Math.abs(W2.v - GATE_LANE_V) < 1.2;
+  const victim = passengerInView(platPeople, 2.6);
+  const ends = lineEnds(WALK.st), to = (WALK.dir > 0 ? ends.plus : ends.minus) || { name: 'end of the line' };
+  let msg = esc(WALK.st.name);
+  if (atGate) msg = `<kbd>E</kbd> Tap out with your ${esc(L.card)}`;
+  else if (victim) msg = `<kbd>E</kbd> Rob them`;
+  else if (t) msg = t.atSt === WALK.st && t.dwell > 0 ? `Train to <b>${esc(to.name)}</b> · doors open: walk on` : `Train to <b>${esc(to.name)}</b> · ${Math.abs(stopAt(t, WALK.st) - t.s) > 30 ? `arriving in ${Math.max(1, Math.round(Math.abs(stopAt(t, WALK.st) - t.s) / Math.max(4, t.v || 8)))} s` : 'now arriving'}`;
+  prompt.innerHTML = msg + ` &nbsp; <span style="opacity:.6">WASD walk · mouse look</span>`;
+  W2.eCd = Math.max(0, (W2.eCd || 0) - d);
+  if (keys.has('KeyE') && W2.eCd <= 0) {
+    keys.delete('KeyE');
+    if (atGate) {
+      // back through the gates (the normal walk out from here: tap, then out to the street)
+      const pts = pathOut(F, 0), gi = pts.findIndex((n) => n.tag === 'gate');
+      WALK.pts = [node(F.W(W2.u, W2.v, 0)), ...pts.slice(gi)]; WALK.i = 0; WALK.f = 0; WALK.free = null; WALK.stage = 'out';
+      if (WALK.train && !(RIDE.on && RIDE.train === WALK.train)) { WALK.train.hold = false; WALK.train.mine = false; WALK.train = null; }
+    } else if (victim) robPassenger(victim, platPeople);
+  }
+}
+function boardFree(t, door) {
+  const cg = t.cars[door.car], side = Math.sign(-t.dir) || 1;
+  RIDE.on = true; RIDE.train = t; RIDE.car = door.car; RIDE.view = 'walk';
+  RIDE.walk = { x: side * 0.95, z: door.dz }; RIDE.seat = pickSeat(door.dz, side);
+  // face into the car
+  RIDE.yaw = side > 0 ? -Math.PI / 2 : Math.PI / 2; RIDE.pitch = -0.05;
+  WALK.on = false; WALK.free = null;
+  t.hold = false; t.dwell = Math.max(Math.min(t.dwell, 6), 4); t.call = null; t.boardSt = WALK.st; t.departed = false; t.mine = true;
+  attachScreens(cg); fillCar(cg, { x: 99, z: 99 });
+  camSnap = true;
+  popup('On the train · walk about, E by a seat to sit, E at someone to rob them', '');
+}
+// on the train, on your feet: the aisle and the doorways; out of an open door at a stop
+const CAR_SEAT_Z = [-8.15, -5.65, -3.0, -1.4, 1.4, 3.0, 5.65, 8.15];
+function trainWalkStep(d) {
+  const t = RIDE.train, w = RIDE.walk, prompt = $('#prompt');
+  const fw = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0), st = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0);
+  const sp = (keys.has('ShiftLeft') || keys.has('ShiftRight') ? 2.4 : 1.3) * d;
+  const fx = Math.sin(RIDE.yaw), fz = Math.cos(RIDE.yaw), rx = -Math.cos(RIDE.yaw), rz = Math.sin(RIDE.yaw);
+  const side = Math.sign(-t.dir) || 1, cg = t.cars[RIDE.car];
+  const doorOpen = t.atSt && t.dwell > 0 && (cg.userData.open || 0) > 0.9;
+  const ok = (x, z) => {
+    if (Math.abs(z) > CAR_LEN / 2 - 0.9) return false;
+    if (Math.abs(x) <= 0.42) return true;                                                     // the aisle
+    const atDoor = DOOR_Z.some((dz) => Math.abs(z - dz) < DOOR_W / 2 + 0.15);
+    if (atDoor && Math.abs(x) <= 1.25) return true;                                          // the doorways
+    return atDoor && doorOpen && Math.sign(x) === side && Math.abs(x) <= 2.2;                // out through the door
+  };
+  const nx = w.x + (fx * fw + rx * st) * sp, nz = w.z + (fz * fw + rz * st) * sp;
+  if (ok(nx, nz)) { w.x = nx; w.z = nz; } else if (ok(nx, w.z)) w.x = nx; else if (ok(w.x, nz)) w.z = nz;
+  RIDE.bob = (RIDE.bob || 0) + ((fw || st) ? d : 0);
+  // stepped out onto the platform
+  if (Math.abs(w.x) > 1.6 && t.atSt) { stepOffFree(t); prompt.hidden = true; return; }
+  const victim = passengerInView(carPeople, 3);
+  const seatZ = CAR_SEAT_Z.reduce((a, b) => Math.abs(b - w.z) < Math.abs(a - w.z) ? b : a), nearSeat = Math.abs(seatZ - w.z) < 0.7 && Math.abs(w.x) < 0.6;
+  prompt.hidden = false;
+  prompt.innerHTML = victim ? '<kbd>E</kbd> Rob them' : doorOpen ? `Doors open at <b>${esc(t.atSt.name)}</b>: walk out` : nearSeat ? '<kbd>E</kbd> Sit down' : 'WASD walk · mouse look';
+  if (keys.has('KeyE')) {
+    keys.delete('KeyE');
+    if (victim) robPassenger(victim);
+    else if (nearSeat) {
+      // the seat on the side you're facing
+      const s = Math.sign(-Math.sin(RIDE.yaw)) || 1;
+      RIDE.seat = { x: s * 1.04, z: seatZ, f: 1 }; RIDE.view = 'seat'; RIDE.yaw = s > 0 ? 0.45 : -0.45; camSnap = true;
+    }
+  }
+}
+function stepOffFree(t) {
+  const st = t.atSt, F = stationFrame(st), cg = t.cars[RIDE.car], side = Math.sign(-t.dir) || 1;
+  const p = carWorld(cg, side * 1.9, 0, RIDE.walk.z), dx = p.x - F.P.px, dz = p.z - F.P.pz;
+  detachScreens(); disposePeople(carPeople); carPeople = null;
+  t.hold = false; t.mine = false;
+  RIDE.on = false; RIDE.train = null; RIDE.view = 'seat';
+  Object.assign(WALK, { on: true, pts: [node(p)], i: 0, f: 0, st, F, dir: t.dir, stage: 'free', train: null, bob: 0, pitch: -0.05 });
+  WALK.free = { u: dx * F.ux + dz * F.uz, v: Math.max(PLAT_V0 + 0.5, dx * F.vx + dz * F.vz), y: F.yP, escDir: -F.su, eCd: 1.2 };
+  WALK.yaw = Math.atan2(-F.vx, -F.vz);                       // facing away from the track
+  fillPlatform(F);
+  popup(st.name, 'place'); camSnap = true;
+}
+
 // Moving along the walking path. W walks (Shift to hurry); the escalator carries you; gates need a tap.
 function updateWalk(d) {
+  if (WALK.free) { freeStationStep(d); return; }
   const pts = WALK.pts, prompt = $('#prompt'), L = LIVERY[cityKey] || LIVERY.van;
   const gate = STATION_GATES.get(stationKey(WALK.st));
   if (gate) {
@@ -647,6 +792,8 @@ function updateWalk(d) {
     WALK.f -= 1; WALK.i++;
     const n = pts[WALK.i];
     if (n.tag === 'gated' && gate) gate.want = 0;
+    // through the gates on the way in: from here you walk where you like
+    if (n.tag === 'gated' && WALK.stage === 'in') { enterFreeWalk(n.p); return; }
     if (n.tag === 'off') { disposePeople(carPeople); carPeople = null; }
     if (n.tag === 'off' && WALK.train) { WALK.train.hold = false; WALK.train.mine = false; WALK.train = null; }
     if (n.tag === 'sit') { startTrainRide(); prompt.hidden = true; return; }
@@ -665,6 +812,7 @@ function updateWalk(d) {
   prompt.innerHTML = onEsc ? 'Riding the escalator…' : walk ? esc(WALK.st.name) : `Hold <kbd>W</kbd> to walk · mouse to look`;
 }
 function walkPos(out) {
+  if (WALK.free) { const F = WALK.F; return out.set(F.P.px + F.ux * WALK.free.u + F.vx * WALK.free.v, WALK.free.y, F.P.pz + F.uz * WALK.free.u + F.vz * WALK.free.v); }
   const a = WALK.pts[WALK.i].p, b = (WALK.pts[WALK.i + 1] || WALK.pts[WALK.i]).p;
   return out.copy(a).lerp(b, clamp(WALK.f, 0, 1));
 }
@@ -685,6 +833,9 @@ function updateTransit(d) {
     linePoint(MAP.lines[t.line], t.s, TP);
     S.x = t.x; S.z = t.z; S.v = t.v; S.psi = Math.atan2(TP.dx * t.dir, TP.dz * t.dir);
     unseenT += d * 2;     // nobody can see you on the train
+    // on your feet in the car; or W in your seat stands you up
+    if (RIDE.view === 'walk') { trainWalkStep(d); return; }
+    if (RIDE.view === 'seat' && keys.has('KeyW')) { RIDE.walk = { x: 0, z: RIDE.seat.z }; RIDE.view = 'walk'; RIDE.yaw = 0; camSnap = true; return; }
     const ends = lineEnds(t.atSt || nextStation(t) || MAP.lines[t.line].stations[0]), to = (t.dir > 0 ? ends.plus : ends.minus) || { name: 'end of the line' };
     const ns = nextStation(t);
     prompt.hidden = false;
@@ -710,9 +861,11 @@ function transitKey(code) {
   if (WALK.on) return code === 'KeyE';      // handled in updateWalk (taps, stepping on)
   const t = RIDE.train;
   if (S.riding && t) {
+    if (RIDE.view === 'walk') return code === 'KeyE' || code === 'KeyV';     // (E handled as you walk: trainWalkStep)
     if (code === 'KeyV') { RIDE.view = RIDE.view === 'seat' ? 'front' : RIDE.view === 'front' ? 'outside' : 'seat'; popup(RIDE.view === 'seat' ? 'Your seat' : RIDE.view === 'front' ? 'Front window' : 'Outside'); camSnap = true; return true; }
     if (code === 'KeyF') { reverseTrain(); return true; }
-    if (code === 'KeyE') { const victim = passengerInView(); if (victim) { robPassenger(victim); return true; } if (canLeave(t)) leaveTrain(); else popup(t.atSt ? 'Departing…' : 'Wait for the next stop'); return true; }
+    // E: rob whoever you're looking at; at a stop, stand up by the door and walk off
+    if (code === 'KeyE') { const victim = passengerInView(); if (victim) { robPassenger(victim); return true; } if (canLeave(t) && RIDE.view === 'seat') { const dz = DOOR_Z.reduce((a, b) => Math.abs(b - RIDE.seat.z) < Math.abs(a - RIDE.seat.z) ? b : a); RIDE.walk = { x: 0, z: dz }; RIDE.view = 'walk'; RIDE.yaw = (Math.sign(-t.dir) || 1) > 0 ? -Math.PI / 2 : Math.PI / 2; RIDE.yaw = -RIDE.yaw; camSnap = true; popup('Walk out through the open door', ''); return true; } if (canLeave(t)) leaveTrain(); else popup(t.atSt ? 'Departing…' : 'Wait for the next stop'); return true; }
     return false;
   }
   if ((code === 'KeyE' || code === 'KeyF') && RIDE.near && !S.crashed) {
@@ -737,7 +890,15 @@ function transitCamera(dt) {
     return;
   }
   const t = RIDE.train, ln = MAP.lines[t.line];
-  if (RIDE.view === 'seat') {
+  if (RIDE.view === 'walk') {
+    // standing in the car, eye height, a little sway as you walk
+    const cg = t.cars[RIDE.car], w = RIDE.walk, bob = Math.sin((RIDE.bob || 0) * 9) * 0.03;
+    cg.updateMatrixWorld(true);
+    camera.position.copy(cg.localToWorld(tmp.set(w.x, FLOOR_Y + 1.62 + bob, w.z)));
+    cg.getWorldQuaternion(camQ);
+    camE.set(RIDE.pitch, Math.PI + RIDE.yaw, 0); camera.quaternion.copy(camQ).multiply(tmpQ.setFromEuler(camE)); camera.up.set(0, 1, 0);
+    camera.fov += (74 - camera.fov) * Math.min(1, dt * 3);
+  } else if (RIDE.view === 'seat') {
     const cg = t.cars[RIDE.car], s = RIDE.seat;
     cg.updateMatrixWorld(true);
     camera.position.copy(cg.localToWorld(tmp.set(s.x * 0.8, FLOOR_Y + 1.22, s.z + s.f * 0.08)));

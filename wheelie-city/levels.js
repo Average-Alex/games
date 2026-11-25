@@ -53,11 +53,12 @@ function elevatorMenu(b, cur) {
   if (document.pointerLockElement) document.exitPointerLock();
 }
 // some of the taller towers have a helipad on the roof, with a helicopter on it (air.js)
-function towerHelipad(b) { return b.floors >= 10 && mulberry(b.bi * 53 + 7)() < 0.45; }
+// (only where the map really has a helipad on this building's roof; a guess if the city has no aviation data)
+function towerHelipad(b) { return AIRDATA ? !!roofPadOf(b.bi) : b.floors >= 10 && mulberry(b.bi * 53 + 7)() < 0.45; }
 function goRoof(b) {
   const keep = FOOT.store;
   clearRoom(); FOOT.store = null;
-  const rec = roofHeli(b.bi);
+  const rec = (AIRDATA && roofPadOf(b.bi)) || roofHeli(b.bi);
   // out of the roof access, a few metres from the pad
   const ok = (x, z) => [[0, 0], [0.5, 0], [-0.5, 0], [0, 0.5], [0, -0.5]].every(([a, c]) => insideBuilding(b.bi, x + a, z + c, 0));
   let x = rec.x, z = rec.z + 0.1;
@@ -109,7 +110,9 @@ function enterUnit(b, f, idx, side, z, L) {
   sfx.thump && sfx.thump(0.6);
   const back = () => goLevel(() => buildHall(b, f), { x: side * 1.2, z, yaw: side > 0 ? -Math.PI / 2 : Math.PI / 2 }, () => { FOOT.z = ROOM.box.z0 + 1.1; elevatorMenu(b, f); });
   goLevel(() => {
-    if (b.offices) buildOffice(seed); else buildHomeRoom({ bi: seed, shell: { front: 'wall' } });
+    // (an apartment's as well off as its building's area, and the top floors are the penthouses)
+    const tier = clamp((typeof homeWealth === 'function' ? homeWealth(b.bi) : 1) + (f >= b.floors - 1 ? 2 : f > b.floors * 0.7 ? 1 : 0), 0, 3);
+    if (b.offices) buildOffice(seed); else if (typeof buildHouse === 'function') buildHouse({ bi: seed, shell: { front: 'wall' } }, tier); else buildHomeRoom({ bi: seed, shell: { front: 'wall' } });
     if (mulberry(seed)() < 0.5) mirrorRoom();
   }, null, back);
   if (b.offices) {
